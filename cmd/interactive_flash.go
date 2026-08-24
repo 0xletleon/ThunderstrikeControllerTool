@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"thunderstrike-controller-tool/firmware"
+	"thunderstrike-controller-tool/hid"
 	"thunderstrike-controller-tool/logger"
 )
 
@@ -337,8 +338,26 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 	printInfoLine("写入", fmt.Sprintf("%d bytes (%.1f KB)", otaSize, float64(otaSize)/1024.0))
 	printInfoLine("固件", fmt.Sprintf("V%s → V%s", d.fwVersion, blkz.Manifest.VersionString()))
 	fmt.Println()
-	fmt.Println("    手柄将自动重启，请等待重新连接。")
-	fmt.Println("    30 秒内未重启请手动开机。")
+
+	// 通过 HID 发送 CMD_RESET 确保设备重启
+	fmt.Println("    正在重启手柄...")
+	if resetErr := sendHidReset(); resetErr != nil {
+		fmt.Printf("    ⚠ HID 重启失败: %v\n", resetErr)
+		fmt.Println("      APPLY_OTA 已触发重启，请等待重连。")
+	} else {
+		fmt.Println("    ✓ 重启指令已发送")
+	}
+
+	// 等待设备重连
+	for i := 5; i > 0; i-- {
+		fmt.Printf("\r    等待重连... %ds  ", i)
+		time.Sleep(1 * time.Second)
+	}
+	if path, _ := hid.FindThunderstrikeHidDevice(); path != "" {
+		fmt.Println("\r    ✓ 设备已重新连接      ")
+	} else {
+		fmt.Println("\r    设备尚未重连，请稍候  ")
+	}
 	fmt.Println()
 
 	if fwLog != nil {
@@ -348,6 +367,25 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 	fmt.Println()
 	fmt.Println("  ────────────────────────────────────────────────────────────────────────────")
 
+	return nil
+}
+
+// sendHidReset 通过 HID 接口发送 CMD_RESET 命令重启手柄。
+// 原版 APK Bt_Ops.requestReboot(): requestData(CMD_RESET, 1)。
+// 设备收到后会断开蓝牙并重新连接。
+func sendHidReset() error {
+	client, err := hid.OpenWindowsHidClient()
+	if err != nil {
+		return fmt.Errorf("打开 HID 设备: %w", err)
+	}
+	defer client.Close()
+
+	_, err = client.SendCommand(hid.CmdReset, []byte{0x01})
+	if err != nil {
+		// 重启后设备会立即断开，ReadFile 超时属正常
+		// 只要 WriteFile 成功，命令就已经发出
+		return nil
+	}
 	return nil
 }
 

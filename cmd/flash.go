@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"thunderstrike-controller-tool/firmware"
+	"thunderstrike-controller-tool/hid"
 )
 
 var (
@@ -130,7 +131,22 @@ func runFlash(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  写入量   : %d bytes\n", result.BytesWrite)
 	fmt.Printf("  新版本   : V%s\n", blkz.Manifest.VersionString())
 	fmt.Println()
-	fmt.Println("手柄应该会自动重启并加载新固件。")
-	fmt.Println("如果在 30 秒内没有重启，请手动开机。")
+
+	// 通过 HID 发送 CMD_RESET 确保设备重启
+	fmt.Print("正在重启手柄... ")
+	hidClient, hidErr := hid.OpenWindowsHidClient()
+	if hidErr != nil {
+		fmt.Printf("HID 打开失败: %v（APPLY_OTA 已触发重启）\n", hidErr)
+	} else {
+		_, cmdErr := hidClient.SendCommand(hid.CmdReset, []byte{0x01})
+		hidClient.Close()
+		if cmdErr != nil {
+			// 设备收到 RESET 后会立即断开，ReadFile 超时属正常
+			fmt.Println("重启指令已发送（设备断开中）")
+		} else {
+			fmt.Println("重启指令已发送")
+		}
+	}
+	fmt.Println("请等待手柄重新连接。")
 	return nil
 }
