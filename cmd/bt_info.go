@@ -1,98 +1,127 @@
-// Package cmd — device info display via Windows HID API.
+// Package cmd — 设备信息读取（通过 Windows HID API）。
 //
-// The Thunderstrike controller exposes two Bluetooth interfaces:
-//  1. SPP (COM port) — for firmware flashing only (NOP/ERASE/WRITE/...)
-//  2. HID device (\\?\hid#... path) — for device info queries (VERSION, etc.)
+// 手柄通过蓝牙注册两个独立接口：
+//   - SPP (COM 口) → 固件刷写
+//   - HID (\\?\hid#... 路径) → 设备信息查询
 //
-// This file uses the Windows HID API to query firmware version, board info,
-// and MAC address. Device name comes from WMI discovery data.
+// 通过 Windows HID API 发送 HID 报告查询 VERSION/BOARD_INFO/MAC_ADDRESS。
 package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"thunderstrike-controller-tool/hid"
 )
 
-// printBluetoothDeviceInfo queries device info via the Windows HID interface.
-// It opens the HID device, sends VERSION/BOARD_INFO/MAC_ADDRESS commands,
-// and displays the results alongside WMI-discovered name and MAC.
+// printBluetoothDeviceInfo 通过 Windows HID API 查询设备信息并显示。
+// 设备名称和 MAC 来自 WMI，固件版本/硬件版本/序列号来自 HID 查询。
+// 输出格式：缩进对齐，无框线。
+// 查询成功后将固件版本写入 d.fwVersion 供后续刷写流程使用。
 func printBluetoothDeviceInfo(d *discoveredDevice) {
-	fmt.Printf("  设备名称   : %s\n", d.deviceName)
-	fmt.Printf("  MAC 地址   : %s (WMI)\n", d.mac)
+	printInfoLine("设备名称", d.deviceName)
+	printInfoLine("MAC 地址", d.mac)
 
-	// Open Windows HID device
+	// 打开 Windows HID 设备
 	client, err := hid.OpenWindowsHidClient()
 	if err != nil {
-		fmt.Printf("  软件版本   : 读取失败 (HID 设备未找到)\n")
-		fmt.Printf("  硬件版本   : 读取失败\n")
-		fmt.Println("  提示       : 请确保手柄已连接并唤醒")
+		printInfoLine("软件版本", "读取失败 (HID 设备未找到)")
+		printInfoLine("提示", "请确保手柄已连接并唤醒")
 		return
 	}
 	defer client.Close()
 
-	// Query firmware version
-	// Response: [fw_minor][fw_major][csr_minor][csr_major][hw_minor][hw_major]...
-	fmt.Printf("  软件版本   : ")
+	// 查询固件版本
+	// 响应: [fw_minor][fw_major][csr_minor][csr_major][hw_minor][hw_major]...
 	verData, err := client.SendCommand(hid.CmdVersion, nil)
 	if err != nil {
-		fmt.Printf("读取失败 (%v)\n", err)
+		printInfoLine("软件版本", fmt.Sprintf("读取失败 (%v)", err))
 	} else if len(verData) >= 2 {
 		major := int(verData[1])
 		minor := int(verData[0])
-		fmt.Printf("V%d.%02d (0x%02X%02X)\n", major, minor, major, minor)
+		d.fwVersion = fmt.Sprintf("%d.%02d", major, minor)
+		printInfoLine("软件版本", fmt.Sprintf("V%d.%02d (0x%02X%02X)", major, minor, major, minor))
 		if len(verData) >= 4 {
-			cMajor := int(verData[3])
-			cMinor := int(verData[2])
-			fmt.Printf("  蓝牙芯片   : CSR v%d.%02d\n", cMajor, cMinor)
+			printInfoLine("蓝牙芯片",
+				fmt.Sprintf("CSR v%d.%02d", int(verData[3]), int(verData[2])))
 		}
 		if len(verData) >= 6 {
-			hMajor := int(verData[5])
-			hMinor := int(verData[4])
-			fmt.Printf("  热词引擎   : v%d.%02d\n", hMajor, hMinor)
+			printInfoLine("热词引擎",
+				fmt.Sprintf("v%d.%02d", int(verData[5]), int(verData[4])))
 		}
 	} else {
-		fmt.Println("响应数据不足")
+		printInfoLine("软件版本", "响应数据不足")
 	}
 
-	// Query board info (hardware version + serial number)
-	fmt.Printf("  硬件版本   : ")
+	// 查询硬件版本 + 序列号
 	boardData, err := client.SendCommand(hid.CmdBoardInfo, nil)
 	if err != nil {
 		if err == hid.ErrCmdError {
-			fmt.Println("不支持 (CMD_ERROR)")
+			printInfoLine("硬件版本", "不支持")
 		} else {
-			fmt.Printf("读取失败 (%v)\n", err)
+			printInfoLine("硬件版本", fmt.Sprintf("读取失败 (%v)", err))
 		}
 	} else if len(boardData) >= 2 {
-		// Response: [board_type][board_rev][serial_string...]
-		// e.g. 00 02 30 33 32 31 38 31 37 30 38 36 39 34 38 = type=0 rev=2 serial="0321817086948"
 		boardType := int(boardData[0])
 		boardRev := int(boardData[1])
+		printInfoLine("硬件版本", fmt.Sprintf("Board %d Rev %d", boardType, boardRev))
 		serial := extractSerial(boardData[2:])
 		if serial != "" {
-			fmt.Printf("Board %d Rev %d, S/N: %s\n", boardType, boardRev, serial)
-		} else {
-			fmt.Printf("Board %d Rev %d\n", boardType, boardRev)
+			printInfoLine("序列号", serial)
 		}
 	} else {
-		fmt.Println("数据不足")
+		printInfoLine("硬件版本", "数据不足")
 	}
 
-	// Query MAC address via HID (verify against WMI)
-	fmt.Printf("  MAC(HID)   : ")
+	// 查询 MAC 地址（与 WMI 对比验证）
 	macData, err := client.SendCommand(hid.CmdMacAddress, nil)
 	if err != nil {
 		if err == hid.ErrCmdError {
-			fmt.Println("不支持 (CMD_ERROR)")
+			printInfoLine("MAC(HID)", "不支持")
 		} else {
-			fmt.Printf("读取失败 (%v)\n", err)
+			printInfoLine("MAC(HID)", fmt.Sprintf("读取失败 (%v)", err))
 		}
 	} else if len(macData) >= 6 {
-		fmt.Println(hid.FormatMacAddress(macData[:6]))
+		printInfoLine("MAC(HID)", hid.FormatMacAddress(macData[:6]))
 	} else {
-		fmt.Printf("数据不足 (%d bytes)\n", len(macData))
+		printInfoLine("MAC(HID)", fmt.Sprintf("数据不足 (%d bytes)", len(macData)))
 	}
 
-	fmt.Printf("  传输方式   : 蓝牙 HID\n")
+	printInfoLine("传输方式", "蓝牙 HID")
+}
+
+// printInfoLine 打印一行 "    标签      值"。
+// 标签固定占 8 个显示宽度，值跟在后面，无框线不需要截断。
+func printInfoLine(label, value string) {
+	// 中文标签宽度处理：4 个中文字 = 8 显示宽度
+	labelWidth := displayWidth(label)
+	pad := 8 - labelWidth
+	if pad < 1 {
+		pad = 1
+	}
+	fmt.Printf("    %s%s%s\n", label, strings.Repeat(" ", pad), value)
+}
+
+// displayWidth 计算字符串的显示宽度（中文=2，ASCII=1）。
+func displayWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		w += runeWidth(r)
+	}
+	return w
+}
+
+// runeWidth 返回字符的显示宽度（中文=2，ASCII=1）。
+func runeWidth(r rune) int {
+	if r >= 0x1100 && (
+		r <= 0x115F || // 韩文
+		r >= 0x2E80 && r <= 0xA4CF || // 中日韩
+		r >= 0xAC00 && r <= 0xD7A3 || // 韩文音节
+		r >= 0xF900 && r <= 0xFAFF || // 兼容汉字
+		r >= 0xFE30 && r <= 0xFE4F || // 兼容形式
+		r >= 0xFF00 && r <= 0xFF60 || // 全角
+		r >= 0xFFE0 && r <= 0xFFE6) { // 全角符号
+		return 2
+	}
+	return 1
 }

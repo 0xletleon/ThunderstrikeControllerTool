@@ -40,12 +40,6 @@ func Execute() {
 	}
 }
 
-// RunInteractive launches the interactive device selection and info display mode.
-// This is called by main() when no command-line arguments are provided.
-func RunInteractive() error {
-	return runInteractive()
-}
-
 func init() {
 	// Register legacy subcommands (kept for advanced/scripted use).
 	rootCmd.AddCommand(scanCmd)
