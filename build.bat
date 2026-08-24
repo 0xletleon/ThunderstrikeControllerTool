@@ -9,7 +9,7 @@ cd /d "%~dp0"
 
 set GOPROXY=https://goproxy.cn,direct
 
-echo [1/3] go mod tidy
+echo [1/2] go mod tidy
 go mod tidy
 if errorlevel 1 (
     echo [ERROR] go mod tidy failed
@@ -17,16 +17,16 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [2/3] go build
-go build -o tsct.exe .
+echo [2/2] go build
+go build -o Release\tsct.exe .
 if errorlevel 1 (
     echo [ERROR] build failed
     pause
     exit /b 1
 )
 
-echo [3/3] done
 echo.
-echo   Output: tsct.exe
+echo   Output: Release\tsct.exe
+echo   Files copied to Release\
 echo.
 pause
