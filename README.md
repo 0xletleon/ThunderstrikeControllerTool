@@ -1,35 +1,36 @@
 # Thunderstrike Controller Tool
 
 > NVIDIA SHIELD TV 2017 Thunderstrike 手柄命令行工具，
-> 支持设备信息读取和固件刷写/降级（蓝牙 SPP）。
+> 支持设备信息读取（HID）和固件刷写/降级/升级/平刷（蓝牙 SPP）。
 > 仅支持 Windows，仅通过蓝牙连接。
 
 ## 项目背景
 
 NVIDIA SHIELD TV 2017（中国版）配套的 **Thunderstrike** 手柄基于 CSR 蓝牙芯片。
 
-- **旧固件** `v1.14`（`0x010e`）— 从 ROM 中提取
-- **新固件** `v1.33`（`0x0121`）— 当前手柄安装版本
+- **旧固件** `v1.14`（`0x010E`）— 从 ROM 中提取
+- **中间版本** `v1.18`（`0x0112`）— 从固件包提取
+- **新固件** `v1.33`（`0x0121`）— 出厂安装版本
 - **locale 固件** `v1.36`（`0x0124`）— 多语言版本
 
-Android 系统的 `BtUpdater` 在升级时检查固件版本号，拒绝降级。
-但 SPP 协议本身不检查版本号——只要签名匹配即可刷写。
-本工具直接通过 SPP 协议与手柄通信，绕过 Android 端的降级限制。
+手柄通过蓝牙注册**两个独立接口**：SPP（刷写）和 HID（查询）。
+Android 的 `BtUpdater` 检查版本号拒绝降级，但 SPP 协议本身不检查版本号——
+只要签名匹配即可刷写。本工具直接通过 SPP 刷写固件，绕过 Android 端的降级限制。
 
 ## 当前状态
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| 交互模式 | ✅ 已实现 | 扫描蓝牙 SPP → 探测手柄 → 显示信息 → 刷写固件 |
+| 交互模式 | ✅ 已实现 | WMI 发现设备 → HID 查询信息 → SPP 刷写固件 |
 | `scan` — 扫描蓝牙串口 | ✅ 已实现 | 列出系统所有 COM 串口 |
 | `flash` — 刷写固件 | ✅ 已实现 | SPP 协议完整实现，`--dry-run` 可验证固件包 |
-| 设备信息读取 | ✅ 已实现 | 通过蓝牙 SPP 读取版本/MAC/序列号/传输方式 |
+| 设备信息读取 | ✅ 已实现 | Windows HID API 查询版本/序列号/MAC + WMI 设备名 |
 | 固件列表 | ✅ 已实现 | 扫描 blkz/ 目录，显示版本/大小/MD5 校验状态 |
 | 交互模式刷写 | ✅ 已实现 | 选择设备 → 选择固件 → MD5 校验 → 刷写 |
 | 多语言固件 | ✅ 已实现 | 支持 locale 版本的 .ota 选择 |
-| 蓝牙设备探测 | ✅ 已实现 | 扫描时对每个 COM 口发送 NOP，识别手柄 |
+| 蓝牙设备发现 | ✅ 已实现 | WMI 查询 BTHENUM 端口，提取 MAC 地址，瞬时完成 |
 
-> **USB 支持已移除**：原版应用不支持 USB 刷固件，本工具仅通过蓝牙 SPP 通信。
+> **实测验证**：已成功通过本工具将固件从 V1.33 降级到 V1.18，刷写耗时约 39 秒。
 
 ## 系统要求
 
@@ -63,13 +64,23 @@ tsct
 ```
 
 流程：
-1. 扫描蓝牙 SPP 串口 → 对每个 COM 口发送 NOP 探测，识别手柄
-2. 列出设备：`Thunderstrike (蓝牙) COM3` 或 `蓝牙串口 (SPP) COM4`
-3. 选择设备编号 → 显示设备信息（版本/MAC/序列号/传输方式）
+1. WMI 查询蓝牙 SPP 串口（`Get-WmiObject Win32_SerialPort`），从 `BTHENUM\` 前缀提取 MAC 地址，瞬时完成
+2. 列出设备：`NVIDIA Controller  COM3  (00:04:4B:92:04:F4)`
+3. 选择设备编号 → 通过 Windows HID API 查询设备信息：
+   ```
+   设备名称   : NVIDIA Controller
+   MAC 地址   : 00:04:4B:92:04:F4 (WMI)
+   软件版本   : V1.33 (0x0121)
+   蓝牙芯片   : CSR v0.18
+   热词引擎   : v1.05
+   硬件版本   : Board 0 Rev 2, S/N: 0321817086948
+   MAC(HID)   : 00:04:4B:92:04:F4
+   传输方式   : 蓝牙 HID
+   ```
 4. 提示「是否刷写固件?」→ 输入 `y`
 5. 列出 blkz/ 目录下的固件包 → 选择固件
 6. MD5 安全校验 → 多语言固件选择语言
-7. 确认后开始刷写（NOP → ERASE → WRITE → VALIDATE → APPLY）
+7. 确认后开始刷写（NOP → ERASE → WRITE → VALIDATE → APPLY），约 39 秒完成
 
 ### 命令行模式
 
@@ -90,34 +101,36 @@ tsct flash -f firmware.blkz --dry-run
 
 ## 通信协议
 
-### 蓝牙 SPP（设备信息查询 + 固件刷写）
+### 双通道通信
 
-本工具仅通过蓝牙 SPP 通信。SPP 连接同时支持两种协议：
+手柄通过蓝牙注册**两个独立接口**：
 
-#### HID-over-SPP（设备信息查询）
+| 接口 | UUID | Windows 路径 | 用途 |
+|------|------|-------------|------|
+| SPP | `{00001101-...}` | COM3 (BTHENUM) | 固件刷写（NOP/ERASE/WRITE/VALIDATE/APPLY）|
+| HID | `{00001124-...}` | `\\?\hid#...` | 设备信息查询（VERSION/BOARD_INFO/MAC）|
 
-与 USB HID 相同的报告格式，通过 SPP 串口传输：
+> **关键发现**：SPP 串口上只支持刷写协议 `[cmd][2B LE len][data]`，
+> 不支持 HID 报告格式 `[0x04][cmd][txn][data]`。
+> 设备信息查询通过 Windows HID API（`CreateFile` + `WriteFile`/`ReadFile`）
+> 打开 `\\?\hid#vid_0955&pid_7214#...` 路径，发送 HID 报告获取。
 
-```
-请求: [0x04] [cmd_ordinal] [transaction_id] [data...] [zero-padded to 33 bytes]
-响应: [0x03] [cmd_ordinal] [transaction_id] [response_data...]
-```
+#### 设备信息查询（HID 接口）
 
-- 请求前缀 = `0x04`（Output Report）
-- 响应前缀 = `0x03`（Input Report）
-- Report 长度 = 33 字节（`mReportLen = getHidrawReportLength() + 3 = 30 + 3`）
-- 最大响应 = 65 字节（`MAX_RESPONSE_SIZE = 0x41`）
-- Transaction ID 自增匹配，解决缓冲区残留问题
-- 设备对不支持的指令返回 `0xFF` 作为 cmd_ordinal（CMD_ERROR）
+通过 Windows HID API 打开 `\\?\hid#...` 设备路径，发送 HID 报告查询：
 
-**支持的查询指令：**
-
-| 指令 | Code | 说明 |
+| 信息 | 命令 | 说明 |
 |------|------|------|
-| VERSION | 0x01 | 固件版本 + CSR 芯片版本 + 热词引擎版本 |
-| BOARD_INFO | 0x10 | 硬件版本 + 序列号 |
-| MAC_ADDRESS | 0x0B | MAC 地址 |
-| SET_TRANSPORT | 0x49 | 传输方式（0x02=wireless） |
+| 软件版本 | VERSION (0x01) | 返回 [fw_minor][fw_major][csr_minor][csr_major][hw_minor][hw_major] |
+| 硬件版本 | BOARD_INFO (0x10) | 返回 [board_type][board_rev][serial_string] |
+| MAC 地址 | MAC_ADDRESS (0x0B) | 返回 6 字节 MAC，与 WMI 提取一致 |
+| 设备名称 | WMI | VID/PID 识别（`0955:7214` = NVIDIA Controller）|
+
+HID 报告格式：
+```
+请求: [0x04] [cmd] [txn_id] [data...] [zero-padded to 33 bytes]
+响应: [0x03] [cmd] [txn_id] [response_data...]
+```
 
 #### SPP 刷写协议（固件刷写）
 
@@ -233,24 +246,30 @@ ThunderstrikeControllerTool/
 ├── README.md
 ├── blkz/                            # 固件包目录
 │   ├── Thunderstrike_0x010E.blkz   # v1.14 标准固件
+│   ├── Thunderstrike_0x0112.blkz   # v1.18 标准固件
+│   ├── Thunderstrike_0x0124.blkz   # v1.36 标准固件
 │   ├── Thunderstrike_locale_0x0124.blkz  # v1.36 多语言固件
 │   └── README.md                   # 固件目录说明
 ├── cmd/                            # CLI 命令
 │   ├── root.go                     # 根命令注册
 │   ├── scan.go                     # scan — 扫描蓝牙 SPP 串口
-│   ├── interactive.go              # 交互模式（扫描+探测+选择+信息）
+│   ├── bt_discovery_windows.go     # WMI 查询蓝牙 SPP COM 口（BTHENUM MAC 提取）
+│   ├── interactive.go              # 交互模式（WMI 发现+选择+信息）
 │   ├── interactive_flash.go        # 交互模式刷写流程
-│   ├── bt_info.go                  # 蓝牙设备信息读取
+│   ├── bt_info.go                  # 设备信息读取（Windows HID API 查询版本/序列号/MAC）
 │   ├── blkz_list.go                # 固件列表显示
 │   ├── flash.go                    # flash — 刷写命令（命令行模式）
-│   └── flash_core.go               # 刷写核心逻辑（共用）
+│   ├── flash_core.go               # 刷写核心逻辑（共用）
+│   ├── debug_hid/                  # [调试] HID 设备枚举+VERSION 命令测试
+│   └── debug_probe/                 # [调试] SPP COM 口 NOP/HID 命令测试
 ├── hid/                            # HID 协议定义
-│   └── commands.go                 # 命令常量 + ErrCmdError + FormatMacAddress
+│   ├── commands.go                 # 命令常量 + ReportLen + ErrCmdError + FormatMacAddress
+│   └── windows_client.go           # Windows HID API 客户端（SetupDI + CreateFile + WriteFile/ReadFile）
 ├── spp/                            # 蓝牙 SPP 协议栈
 │   ├── protocol.go                 # 命令码、状态码、超时、UpgradeTimings
 │   ├── client.go                   # SPP 刷写客户端（WriteCommand/ReadResponse/Connect）
 │   ├── flasher.go                  # 完整刷写流程（NOP→ERASE→WRITE→VALIDATE→APPLY）
-│   └── hidraw_client.go            # HID-over-SPP 客户端（设备信息查询 + ProbeController）
+│   └── hidraw_client.go            # [遗留] HID-over-SPP 客户端（已被 HID API 替代）
 ├── firmware/                       # 固件解析
 │   ├── blkz.go                     # .blkz 包解析+解压
 │   ├── manifest.go                 # manifest.xml 解析
@@ -298,17 +317,21 @@ WSL 中保存了 SHIELD TV 2017 的完整内核源码：
 ⚠️ **蓝牙连接说明：**
 - 手柄需要先与电脑蓝牙配对，配对后 Windows 会分配 SPP COM 端口
 - 蓝牙列表中 COM3 和 COM4 都出现时，可能没有真正连接的设备
-- 扫描时会自动探测每个 COM 口，标记为 `Thunderstrike (蓝牙)` 的是手柄
+- 扫描通过 WMI 查询 `Win32_SerialPort`，只显示 `BTHENUM\` 前缀的蓝牙 SPP 端口
+- MAC 全零的未绑定端口会被自动过滤
 
 ### 固件版本说明
 
 | 版本 | 代号 | 说明 |
 |------|------|------|
 | v1.14 | 0x010E | 旧版，从 SHIELD TV SW 6.1.0 中国版 ROM 提取 |
-| v1.33 | 0x0121 | 当前手柄安装版本 |
+| v1.18 | 0x0112 | 中间版本，从固件包提取 |
+| v1.33 | 0x0121 | 出厂安装版本 |
 | v1.36 | 0x0124 | 多语言（locale）版本 |
 
 SPP 协议不检查版本号，只要签名匹配即可刷写。
+
+已实测验证：V1.33 → V1.18 降级成功，CSR 芯片版本同步降级（v0.18 → v0.17），热词引擎同步降级（v1.05 → v1.04）。
 
 ## 许可证
 

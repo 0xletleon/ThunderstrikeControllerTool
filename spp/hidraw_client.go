@@ -15,9 +15,7 @@
 package spp
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"time"
 
 	"go.bug.st/serial"
@@ -139,20 +137,15 @@ func (c *HidrawClient) nextTransactionID() byte {
 // purgeRxBuffer drains any pending data in the serial receive buffer.
 // This prevents stale responses from previous commands being misread.
 func (c *HidrawClient) purgeRxBuffer() {
-	// Set a short timeout for the purge read.
-	oldTimeout := DefaultReadTimeout
-	_ = oldTimeout // keep for reference
-
 	buf := make([]byte, 256)
 	for {
-		// Non-blocking read: reset timeout to 1ms to flush available data.
+		// Non-blocking read: 1ms timeout to flush available data.
 		c.port.SetReadTimeout(1 * time.Millisecond)
 		n, err := c.port.Read(buf)
 		if err != nil || n == 0 {
 			break
 		}
 	}
-	// Restore default timeout.
 	c.port.SetReadTimeout(DefaultReadTimeout)
 }
 
@@ -163,87 +156,85 @@ func (c *HidrawClient) purgeRxBuffer() {
 //
 // If the command ordinal is 0xFF (CMD_ERROR) with matching txn ID, the
 // command is not supported.
+//
+// Important: go.bug.st/serial returns an error on read timeout. We must
+// continue retrying until the overall deadline is reached, rather than
+// aborting on the first timeout error.
 func (c *HidrawClient) readMatchingResponse(expectedTxn byte, expectedCmd hid.BtHidrawCommand, timeout time.Duration) ([]byte, error) {
-	c.port.SetReadTimeout(timeout)
+	// Use a short per-read timeout so we can loop and check the deadline.
+	// The overall deadline controls how long we wait in total.
+	perReadTimeout := 500 * time.Millisecond
+	deadline := time.Now().Add(timeout)
+	c.port.SetReadTimeout(perReadTimeout)
 	defer c.port.SetReadTimeout(DefaultReadTimeout)
 
-	deadline := time.Now().Add(timeout)
-	rxBuf := make([]byte, 0, hid.MaxResponseSize*2)
+	// Accumulate received bytes in a buffer.
+	var rxBuf []byte
 
 	for time.Now().Before(deadline) {
-		// Read one byte at a time to find the response prefix 0x03.
-		single := make([]byte, 1)
-		n, err := c.port.Read(single)
+		// Read available bytes.
+		tmp := make([]byte, hid.MaxResponseSize)
+		n, err := c.port.Read(tmp)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				continue
-			}
-			return nil, fmt.Errorf("read: %w", err)
+			// On timeout/error, just continue the loop.
+			// The deadline check will eventually break us out.
+			continue
 		}
 		if n == 0 {
 			continue
 		}
 
-		// Look for response prefix 0x03.
-		if single[0] != hid.ResponsePrefix {
-			continue
+		rxBuf = append(rxBuf, tmp[:n]...)
+
+		// Try to parse a complete response from the accumulated buffer.
+		// Response format: [0x03] [cmd_ordinal] [txn_id] [data...]
+		for len(rxBuf) >= 3 {
+			// Find response prefix 0x03.
+			idx := -1
+			for i, b := range rxBuf {
+				if b == hid.ResponsePrefix {
+					idx = i
+					break
+				}
+			}
+			if idx < 0 {
+				// No prefix found — discard all data.
+				rxBuf = rxBuf[:0]
+				break
+			}
+			// Discard bytes before the prefix.
+			rxBuf = rxBuf[idx:]
+
+			if len(rxBuf) < 3 {
+				// Need at least 3 bytes for the header.
+				break
+			}
+
+			respCmd := hid.BtHidrawCommand(rxBuf[1])
+			respTxn := rxBuf[2]
+
+			// The response data is everything after the 3-byte header.
+			// We don't know the exact length, so take what we have.
+			// If more data is arriving, it will be appended in the next read.
+			respData := rxBuf[3:]
+
+			// Check for CMD_ERROR (0xFF) with matching txn ID.
+			if byte(respCmd) == 0xFF && respTxn == expectedTxn {
+				return nil, hid.ErrCmdError
+			}
+
+			// Check for a matching response.
+			if respCmd == expectedCmd && respTxn == expectedTxn {
+				// Return a copy of the response data.
+				result := make([]byte, len(respData))
+				copy(result, respData)
+				return result, nil
+			}
+
+			// Mismatch — discard the 3-byte header and keep scanning.
+			rxBuf = rxBuf[3:]
 		}
-
-		// Read the next two bytes: [cmd_ordinal] [transaction_id].
-		header := make([]byte, 2)
-		_, err = io.ReadFull(portReader{port: c.port, timeout: deadline}, header)
-		if err != nil {
-			return nil, fmt.Errorf("read header: %w", err)
-		}
-
-		respCmd := hid.BtHidrawCommand(header[0])
-		respTxn := header[1]
-
-		// Read the response data — up to MaxResponseSize bytes or until timeout.
-		dataBuf := make([]byte, hid.MaxResponseSize)
-		c.port.SetReadTimeout(100 * time.Millisecond)
-		dataN, _ := c.port.Read(dataBuf)
-		c.port.SetReadTimeout(timeout)
-
-		rxData := dataBuf[:dataN]
-
-		// Check for CMD_ERROR (0xFF) with matching txn ID.
-		if byte(respCmd) == 0xFF && respTxn == expectedTxn {
-			return nil, hid.ErrCmdError
-		}
-
-		// Check for a matching response.
-		if respCmd == expectedCmd && respTxn == expectedTxn {
-			return rxData, nil
-		}
-
-		// Mismatch — stale response, keep scanning.
-		rxBuf = append(rxBuf, single[0], header[0], header[1])
-		rxBuf = append(rxBuf, rxData...)
-		continue
 	}
 
 	return nil, fmt.Errorf("timeout waiting for %s response (txn=%d)", expectedCmd, expectedTxn)
-}
-
-// portReader wraps a serial.Port to implement io.Reader with a deadline.
-type portReader struct {
-	port    serial.Port
-	timeout time.Time
-}
-
-func (pr portReader) Read(p []byte) (int, error) {
-	remaining := time.Until(pr.timeout)
-	if remaining <= 0 {
-		return 0, fmt.Errorf("timeout")
-	}
-	pr.port.SetReadTimeout(remaining)
-	n, err := pr.port.Read(p)
-	if err != nil {
-		return 0, err
-	}
-	if n == 0 {
-		return 0, fmt.Errorf("no data")
-	}
-	return n, nil
 }

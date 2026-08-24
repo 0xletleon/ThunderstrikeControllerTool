@@ -174,6 +174,11 @@ const (
 // From ThunderstrikeController.getHidrawReportLength() = 0x1E = 30 bytes.
 const DefaultReportLength = 30
 
+// ReportLen is the total HID report length including the 3-byte header
+// (prefix + cmd + txn). Used for both USB HID and Bluetooth SPP transports.
+// From Bt_Ops.smali: mReportLen = getHidrawReportLength() + 3 = 30 + 3 = 33.
+const ReportLen = DefaultReportLength + 3
+
 // MaxResponseSize is the maximum HID response size.
 // From DevHidraw.MAX_RESPONSE_SIZE = 0x41 = 65 bytes.
 const MaxResponseSize = 65

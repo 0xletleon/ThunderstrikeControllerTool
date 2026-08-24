@@ -1,12 +1,11 @@
 // Package cmd — interactive Bluetooth SPP device selection and info display.
 //
 // This file implements the interactive CLI flow:
-//  1. Scan for Bluetooth SPP serial ports
-//  2. Probe each port to identify Thunderstrike controllers
-//  3. List found devices
-//  4. User selects a device by number
-//  5. Print device info (hardware version, firmware version, MAC address)
-//  6. Offer firmware flashing option
+//  1. Discover Bluetooth SPP serial ports via WMI
+//  2. List found devices
+//  3. User selects a device by number
+//  4. Print device info (hardware version, firmware version, MAC address)
+//  5. Offer firmware flashing option
 package cmd
 
 import (
@@ -15,17 +14,15 @@ import (
 	"os"
 	"strconv"
 	"strings"
-
-	"go.bug.st/serial"
-	"thunderstrike-controller-tool/spp"
 )
 
 // discoveredDevice represents a Bluetooth SPP port found during scanning.
 type discoveredDevice struct {
-	index    int
-	name     string // display name
-	port     string // COM port path
-	isCtrl   bool   // true if identified as Thunderstrike controller
+	index      int
+	name       string // display name
+	port       string // COM port path
+	mac        string // MAC address (XX:XX:XX:XX:XX:XX) from WMI
+	deviceName string // device name from VID/PID (e.g. "NVIDIA Controller")
 }
 
 // runInteractive is the main interactive entry point.
@@ -95,41 +92,28 @@ func runInteractive() error {
 	}
 }
 
-// scanBluetoothSpp scans for Bluetooth SPP serial ports.
-// On Windows, Bluetooth SPP ports are named COMxx.
-// Each port is probed to check if it's a Thunderstrike controller.
+// scanBluetoothSpp discovers Bluetooth SPP serial ports via WMI.
+// Uses Get-WmiObject Win32_SerialPort to find BTHENUM ports with MAC
+// addresses — no serial port probing required, scans instantly.
 func scanBluetoothSpp() ([]discoveredDevice, error) {
-	ports, err := serial.GetPortsList()
+	btPorts, err := discoverBtComPorts()
 	if err != nil {
 		return nil, err
 	}
 
 	var devices []discoveredDevice
 	idx := 1
-	for _, port := range ports {
-		if !strings.HasPrefix(strings.ToUpper(port), "COM") {
-			continue
-		}
-
-		// Probe to check if this is a Thunderstrike controller.
-		fmt.Printf("  探测 %s ...\r", port)
-		isCtrl := spp.ProbeController(port)
-
-		var name string
-		if isCtrl {
-			name = fmt.Sprintf("Thunderstrike (蓝牙)  %s", port)
-		} else {
-			name = fmt.Sprintf("蓝牙串口 (SPP)  %s", port)
-		}
-		devices = append(devices, discoveredDevice{
-			index:  idx,
-			name:   name,
-			port:   port,
-			isCtrl: isCtrl,
-		})
+	for _, bp := range btPorts {
+	name := fmt.Sprintf("%s  %s  (%s)", bp.deviceName(), bp.comPort, bp.macColon)
+	devices = append(devices, discoveredDevice{
+		index:      idx,
+		name:       name,
+		port:       bp.comPort,
+		mac:        bp.macColon,
+		deviceName: bp.deviceName(),
+	})
 		idx++
 	}
-	fmt.Print("                          \r") // clear probe message
 	return devices, nil
 }
 
@@ -142,7 +126,7 @@ func printDeviceInfo(d *discoveredDevice, reader *bufio.Reader) {
 	fmt.Println("═══════════════════════════════════════════")
 	fmt.Println()
 
-	printBluetoothDeviceInfo(d.port)
+	printBluetoothDeviceInfo(d)
 
 	// Offer firmware flashing
 	fmt.Println()
