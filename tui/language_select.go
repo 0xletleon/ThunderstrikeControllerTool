@@ -80,7 +80,7 @@ func (m LanguageSelectModel) View() string {
 	var b strings.Builder
 
 	b.WriteString(RenderAsciiTitle("Thunderstrike", "smslant", colorPrimary))
-	b.WriteString(SubtitleStyle.Render("  NVIDIA SHIELD TV 2017 Thunderstrike Controller Tool"))
+	b.WriteString(RenderSubtitlePlaceholder())
 	b.WriteString("\n\n")
 
 	b.WriteString(SectionHeaderStyle.Render(" ■ 选择语言版本"))

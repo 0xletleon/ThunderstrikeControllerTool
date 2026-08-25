@@ -1,6 +1,6 @@
 ![Thunderstrike Controller](README/shieldtv-2017-controller-Thunderstrike.png)
 
-# Thunderstrike Controller Tool
+# Thunderstrike Controller Tool v0.2
 
     NVIDIA SHIELD TV 2017 Controller Thunderstrike 蓝牙手柄固件管理工具
     支持固件刷写 / 降级 / 升级 / 平刷 · 设备信息读取
@@ -155,11 +155,12 @@ ThunderstrikeControllerTool/
 ![链接电脑蓝牙](README/btc.png)
 
     开始刷固件
-![开始刷固件](README/flashapp.png)
+![开始刷固件1](README/f1.png)
+![开始刷固件1](README/f2.png)
+![开始刷固件1](README/f3.png)
+![开始刷固件1](README/f4.png)
 
-    可以按A+B进入 这个模式,刷机成功！
-    (啥模式我都忘了，哈哈哈~)
-    我忘了,原来的版本好像是 v1.33 !
+    可以按A+B进入BL
 
 ## 注意事项
 

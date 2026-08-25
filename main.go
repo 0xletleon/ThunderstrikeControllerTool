@@ -19,8 +19,9 @@ func main() {
 	scanner := cmd.NewTuiDeviceScanner()
 	fwScanner := cmd.NewTuiFirmwareScanner()
 	flasher := cmd.NewTuiFlasher()
+	monitor := cmd.NewTuiGamepadMonitor()
 
-	if err := tui.Run(scanner, fwScanner, flasher); err != nil {
+	if err := tui.Run(scanner, fwScanner, flasher, monitor); err != nil {
 		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
 		os.Exit(1)
 	}

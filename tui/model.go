@@ -57,6 +57,7 @@ type Model struct {
 	scanner      DeviceScanner
 	fwScanner    FirmwareScanner
 	flasher      Flasher
+	monitor      GamepadMonitor
 
 	// 子视图
 	deviceList  DeviceListModel
@@ -64,6 +65,7 @@ type Model struct {
 	fwList      FirmwareListModel
 	langSelect  LanguageSelectModel
 	flashProg   FlashProgressModel
+	gamepad     GamepadIndicator
 
 	// 当前选中
 	selectedDevice   *DeviceInfo
@@ -77,19 +79,24 @@ type Model struct {
 }
 
 // NewModel 创建 TUI 主模型。
-func NewModel(scanner DeviceScanner, fwScanner FirmwareScanner, flasher Flasher) Model {
+func NewModel(scanner DeviceScanner, fwScanner FirmwareScanner, flasher Flasher, monitor GamepadMonitor) Model {
 	return Model{
 		state:     StateScanning,
 		scanner:   scanner,
 		fwScanner: fwScanner,
 		flasher:   flasher,
+		monitor:   monitor,
 		flashProg: NewFlashProgressModel(),
+		gamepad:   NewGamepadIndicator(),
 	}
 }
 
 // Init 初始化 TUI，启动设备扫描。
 func (m Model) Init() tea.Cmd {
-	return scanDevicesCmd(m.scanner)
+	return tea.Batch(
+		scanDevicesCmd(m.scanner),
+		startGamepadMonitorCmd(m.monitor),
+	)
 }
 
 // Update 处理所有 TUI 消息，协调子视图状态切换。
@@ -107,6 +114,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
+
+	case GamepadInputMsg:
+		var cmd tea.Cmd
+		m.gamepad, cmd = m.gamepad.Update(msg)
+		return m, cmd
+
+	case gamepadTickMsg:
+		var cmd tea.Cmd
+		m.gamepad, cmd = m.gamepad.Update(msg)
+		return m, cmd
 	}
 
 	// 根据当前状态分发消息到对应子视图
@@ -368,33 +385,35 @@ func (m Model) handleCurrentViewResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cm
 
 // View 渲染当前视图。
 func (m Model) View() string {
+	var content string
 	switch m.state {
 	case StateScanning:
 		var b strings.Builder
 		b.WriteString(RenderAsciiTitle("Thunderstrike", "smslant", colorPrimary))
-		b.WriteString(SubtitleStyle.Render("  NVIDIA SHIELD TV 2017 Thunderstrike Controller Tool"))
+		b.WriteString(RenderSubtitlePlaceholder())
 		b.WriteString("\n\n")
 		b.WriteString("\n\n")
 		b.WriteString(DimStyle.Render("  正在扫描蓝牙 SPP 设备..."))
-		return b.String()
+		content = b.String()
 
 	case StateDeviceList:
-		return m.deviceList.View()
+		content = m.deviceList.View()
 
 	case StateDeviceInfo:
-		return m.deviceInfo.View()
+		content = m.deviceInfo.View()
 
 	case StateFirmwareList:
-		return m.fwList.View()
+		content = m.fwList.View()
 
 	case StateLanguageSelect:
-		return m.langSelect.View()
+		content = m.langSelect.View()
 
 	case StateFlashing, StateFlashDone:
-		return m.flashProg.View()
+		content = m.flashProg.View()
 	}
 
-	return ""
+	// 将副标题占位符替换为带手柄状态的副标题
+	return ApplySubtitle(content, m.gamepad.RenderSubtitle())
 }
 
 // --- Commands ---
@@ -465,6 +484,29 @@ func startFlashCmd(flasher Flasher, device DeviceInfo, fw FirmwareInfo) tea.Cmd 
 			errStr = result.Error
 		}
 		return FlashFailedMsg{Error: errStr}
+	}
+}
+
+// GamepadMonitor 手柄输入监听接口（由 cmd 包实现）。
+type GamepadMonitor interface {
+	// StartMonitoring 启动后台监听，检测到手柄输入时调用 onInput。
+	StartMonitoring(onInput func())
+	// StopMonitoring 停止后台监听。
+	StopMonitoring()
+}
+
+// startGamepadMonitorCmd 启动手柄输入监听的 tea.Cmd。
+func startGamepadMonitorCmd(monitor GamepadMonitor) tea.Cmd {
+	return func() tea.Msg {
+		if monitor == nil {
+			return nil
+		}
+		monitor.StartMonitoring(func() {
+			if globalProgram != nil {
+				globalProgram.Send(GamepadInputMsg{})
+			}
+		})
+		return nil
 	}
 }
 
