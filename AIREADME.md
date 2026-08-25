@@ -1,3 +1,5 @@
+![Thunderstrike Controller](README/shieldtv-2017-controller-Thunderstrike.png)
+
 # AIREADME — AI 技术参考
 
 > 本文档供 AI 助手阅读，包含项目的技术实现细节、协议逆向分析、架构决策。
@@ -169,8 +171,8 @@ PC 端无法自动重连蓝牙，本工具的策略：
 | 版本 | 代号 | 说明 |
 |------|------|------|
 | v1.14 | 0x010E | 旧版，从 SHIELD TV 恢复镜像提取 |
-| v1.18 | 0x0112 | 中间版本 |
-| v1.33 | 0x0121 | 出厂安装版本 |
+| v1.18 | 0x0112 | 推荐版本 |
+| v1.33 | 0x0121 | 不能A+B |
 | v1.36 | 0x0124 | 多语言（locale）版本 |
 
 ### 固件提取位置
@@ -178,7 +180,7 @@ PC 端无法自动重连蓝牙，本工具的策略：
 手柄固件 `.blkz` 包位于 SHIELD TV 恢复镜像的 ext4 分区中：
 
 ```
-nv-recovery-image-shield-2017-atv-9.2.1\dumps\vendor.ext4\oem\firmware\
+nv-recovery-image-shield-2017-atv-9.2.1\vendor.ext4\oem\firmware\
 ```
 
 解压恢复镜像后，在 `vendor.ext4` 分区的 `oem/firmware/` 目录下找到固件包。
@@ -216,11 +218,8 @@ ThunderstrikeControllerTool/
 │   └── logger.go                   # 时间戳日志文件
 ├── term/                           # 终端控制
 │   └── term.go                     # ANSI 转义码（清屏、光标等）
-├── blkz/                           # 固件包目录
-│   ├── Thunderstrike_0x010E/       # v1.14 解压后
-│   ├── Thunderstrike_0x0112/       # v1.18 解压后
-│   ├── Thunderstrike_0x0124/       # v1.36 解压后
-│   └── Thunderstrike_locale_0x0124/ # v1.36 多语言解压后
+├── Release/                        # 编译打包目录
+│   ├── Release.zip                 # 包含了手柄固件+刷写工具
 ```
 
 ## 逆向分析来源
@@ -228,7 +227,7 @@ ThunderstrikeControllerTool/
 逆向分析所用 APK 来自 SHIELD TV 2017 恢复镜像：
 
 ```
-nv-recovery-image-shield-2017-atv-9.2.1\dumps\vendor.ext4\app\NvAccessories\NvAccessories.apk
+nv-recovery-image-shield-2017-atv-9.2.1\vendor.ext4\app\NvAccessories\NvAccessories.apk
 ```
 
 | smali 文件 | 提取的信息 |

@@ -1,8 +1,8 @@
-![Thunderstrike Controller](README/Thunderstrike.png)
+![Thunderstrike Controller](README/shieldtv-2017-controller-Thunderstrike.png)
 
 # Thunderstrike Controller Tool
 
-    NVIDIA SHIELD TV 2017 Thunderstrike 蓝牙手柄固件管理工具
+    NVIDIA SHIELD TV 2017 Controller Thunderstrike 蓝牙手柄固件管理工具
     支持固件刷写 / 降级 / 升级 / 平刷 · 设备信息读取
     仅支持 Windows · 仅通过蓝牙连接
 
