@@ -1,10 +1,10 @@
 // Package main — Thunderstrike Controller Tool
 //
-// 交互式工具，用于读取 NVIDIA SHIELD TV 2017 Thunderstrike
-// 手柄的设备信息、刷写/降级固件。
+// 基于 Bubble Tea TUI 框架的 NVIDIA SHIELD TV 2017 Thunderstrike
+// 手柄固件管理工具。
 //
-// 仅支持蓝牙连接。启动后自动扫描蓝牙 SPP 串口，列出可用端口，
-// 选择后通过 Windows HID API 查询设备信息。
+// 支持设备信息读取、固件刷写/降级/升级/平刷。
+// 仅支持 Windows，通过蓝牙连接。
 package main
 
 import (
@@ -12,13 +12,15 @@ import (
 	"os"
 
 	"thunderstrike-controller-tool/cmd"
-	"thunderstrike-controller-tool/term"
+	"thunderstrike-controller-tool/tui"
 )
 
 func main() {
-	term.EnableANSI()
+	scanner := cmd.NewTuiDeviceScanner()
+	fwScanner := cmd.NewTuiFirmwareScanner()
+	flasher := cmd.NewTuiFlasher()
 
-	if err := cmd.RunInteractive(); err != nil {
+	if err := tui.Run(scanner, fwScanner, flasher); err != nil {
 		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
 		os.Exit(1)
 	}
