@@ -70,15 +70,9 @@ func printBlkzList() {
 }
 
 // printBlkzEntry opens a single .blkz file and prints its info.
+// .blkz is a ZIP archive — reads directly from the archive, no extraction needed.
 func printBlkzEntry(index int, path string) {
 	filename := filepath.Base(path)
-
-	// Extract .blkz to same-named subdirectory (idempotent)
-	extractedDir, err := firmware.ExtractBlkz(path)
-	if err != nil {
-		fmt.Printf("  [%d] %s  (解压失败: %v)\n", index, filename, err)
-		return
-	}
 
 	blkz, err := firmware.OpenBlkz(path)
 	if err != nil {
@@ -146,7 +140,6 @@ func printBlkzEntry(index int, path string) {
 	}
 
 	fmt.Printf("      %s\n", checksumLine)
-	_ = extractedDir // directory path available for later use (e.g., reading .ota directly)
 }
 
 // findBlkzDir locates the blkz/ directory.

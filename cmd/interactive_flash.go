@@ -1,13 +1,3 @@
-// Package cmd — 交互模式刷写流程。
-//
-// 用户选择设备后进入刷写流程：
-//   1. 列出 blkz/ 目录下的可用固件包
-//   2. 用户选择固件包
-//   3. MD5 校验（安全检查）
-//   4. 版本对比与用户确认
-//   5. 多语言固件时选择语言
-//   6. 执行刷写（逐步显示进度）
-//   7. 保存日志到 logs/ 目录
 package cmd
 
 import (
@@ -25,7 +15,6 @@ import (
 	"thunderstrike-controller-tool/logger"
 )
 
-// findLogDir 查找程序所在目录的 logs/ 子目录。
 func findLogDir() string {
 	if exePath, err := os.Executable(); err == nil {
 		return filepath.Join(filepath.Dir(exePath), "logs")
@@ -33,10 +22,7 @@ func findLogDir() string {
 	return "logs"
 }
 
-// runInteractiveFlash 是交互模式刷写入口。
-// d 是用户选中的设备，reader 用于读取用户输入。
 func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
-	// Step 1: 查找 blkz 目录
 	blkzDir := findBlkzDir()
 	if blkzDir == "" {
 		fmt.Println()
@@ -45,7 +31,6 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 		return nil
 	}
 
-	// Step 2: 扫描可用固件
 	entries, err := os.ReadDir(blkzDir)
 	if err != nil {
 		fmt.Printf("  读取固件目录失败: %v\n", err)
@@ -70,7 +55,6 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 		return nil
 	}
 
-	// Step 3: 列出并选择固件
 	fmt.Println()
 	fmt.Println("  ── 可用固件 ─────────────────────────────────────────────────────────────────")
 	fmt.Println()
@@ -89,12 +73,6 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 	for i, path := range blkzFiles {
 		filename := filepath.Base(path)
 
-		_, err := firmware.ExtractBlkz(path)
-		if err != nil {
-			fmt.Printf("     %d   %-37s %-8s %s\n", i+1, truncate(filename, 37), "?", "解压失败")
-			continue
-		}
-
 		blkz, err := firmware.OpenBlkz(path)
 		if err != nil {
 			fmt.Printf("     %d   %-37s %-8s %s\n", i+1, truncate(filename, 37), "?", "解析失败")
@@ -111,7 +89,6 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 			csErr: csErr,
 		})
 
-		// 显示固件信息
 		mf := blkz.Manifest
 		verStr := fmt.Sprintf("V%s", mf.VersionString())
 		csStr := "?"
@@ -152,7 +129,6 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 
 	selected := fwList[choice-1]
 
-	// Step 4: MD5 安全检查
 	if selected.csErr != nil {
 		fmt.Printf("\n  ⚠ MD5 读取失败: %v\n", selected.csErr)
 		fmt.Print("  是否继续? [y/n]: ")
@@ -184,7 +160,6 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 		}
 	}
 
-	// Step 5: 多语言固件选择
 	entryIdx := 0
 	blkz := selected.blkz
 	if blkz.Manifest.IsLocale() && len(blkz.OtaEntries) > 1 {
@@ -208,11 +183,30 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 		}
 	}
 
-	// Step 6: 确认刷写
 	otaData, otaSize, err := getOtaData(blkz, entryIdx)
 	if err != nil {
 		fmt.Printf("  获取固件数据失败: %v\n", err)
 		return nil
+	}
+
+	fmt.Println()
+	fmt.Print("  正在检查手柄电量... ")
+	rawBatt, battErr := checkBatteryRaw()
+	if battErr != nil {
+		fmt.Printf("无法获取 (%v)\n", battErr)
+	} else {
+		pct := adcToPercent(rawBatt)
+		level := batteryLevelText(pct)
+		fmt.Printf("%d%%  ADC: %d (%s)\n", pct, rawBatt, level)
+		if pct < 20 {
+			fmt.Println("  ⚠ 电量低于 20%，刷写过程中断电可能导致变砖！")
+			fmt.Print("  是否继续? [y/n]: ")
+			confirm, _ := reader.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(confirm)) != "y" {
+				fmt.Println("  已取消。")
+				return nil
+			}
+		}
 	}
 
 	fmt.Println()
@@ -233,7 +227,6 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 		return nil
 	}
 
-	// Step 7: 创建日志记录器
 	logDir := findLogDir()
 	fwLog, logErr := logger.NewFlashLogger(logDir)
 	if logErr != nil {
@@ -245,7 +238,6 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 		}
 	}()
 
-	// 记录固件信息到日志
 	if fwLog != nil {
 		lang := ""
 		if blkz.Manifest.IsLocale() && entryIdx < len(blkz.OtaEntries) {
@@ -265,14 +257,16 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 		fwLog.LogFlashStart(d.port)
 	}
 
-	// Step 8: 执行刷写（逐步显示进度）
 	fmt.Println()
 	fmt.Println("  ── 刷写中 ───────────────────────────────────────────────────────────────────")
 	fmt.Println()
 
 	flashStart := time.Now()
 
-	// 进度回调
+	stepCB := func(step, total int, name string) {
+		fmt.Printf("    [%d/%d] %s  ...\n", step, total, name)
+	}
+
 	var lastPct int = -1
 	progressCB := func(written, total int) {
 		pct := written * 100 / total
@@ -280,11 +274,9 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 			barLen := 30
 			filled := barLen * written / total
 			bar := strings.Repeat("█", filled) + strings.Repeat("░", barLen-filled)
-			fmt.Printf("\r    [3/5] 写入数据  %s %3d%%  %6d/%d",
-				bar, pct, written, total)
+			fmt.Printf("\r      %s %3d%%  %6d/%d", bar, pct, written, total)
 			if written == total {
-				fmt.Printf("\r    [3/5] 写入数据  %s 完成  %d bytes\n",
-					strings.Repeat("█", 30), total)
+				fmt.Printf("\r      %s 完成  %d bytes\n", strings.Repeat("█", 30), total)
 			}
 			lastPct = pct
 		}
@@ -293,17 +285,15 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 		}
 	}
 
-	fmt.Println("    [1/5] 连接握手  ...")
 	_, err = flashFirmware(&FlashOptions{
 		Port:       d.port,
 		OtaData:    otaData,
 		OtaSize:    otaSize,
 		VersionStr: blkz.Manifest.VersionString(),
-	}, progressCB)
+	}, stepCB, progressCB)
 
 	elapsed := time.Since(flashStart)
 
-	// 记录结果到日志
 	if fwLog != nil {
 		if err != nil {
 			fwLog.LogFlashError(err, elapsed)
@@ -319,16 +309,15 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 		return nil
 	}
 
-	// 回填步骤 1-2 和 4-5 的状态（flashFirmware 内部已完成）
-	fmt.Printf("\r    [1/5] 连接握手  ✓\n")
+	fmt.Println("    [1/5] 连接握手  ✓")
 	fmt.Println("    [2/5] 擦除闪存  ✓")
+	fmt.Println("    [3/5] 写入数据  ✓")
 	fmt.Println("    [4/5] 校验数据  ✓")
 	fmt.Println("    [5/5] 应用固件  ✓")
 
 	fmt.Println()
 	fmt.Println("  ────────────────────────────────────────────────────────────────────────────")
 
-	// Step 9: 成功结果
 	fmt.Println()
 	fmt.Println("  ── 刷写完成 ─────────────────────────────────────────────────────────────────")
 	fmt.Println()
@@ -339,7 +328,6 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 	printInfoLine("固件", fmt.Sprintf("V%s → V%s", d.fwVersion, blkz.Manifest.VersionString()))
 	fmt.Println()
 
-	// 通过 HID 发送 CMD_RESET 确保设备重启
 	fmt.Println("    正在重启手柄...")
 	if resetErr := sendHidReset(); resetErr != nil {
 		fmt.Printf("    ⚠ HID 重启失败: %v\n", resetErr)
@@ -348,7 +336,6 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 		fmt.Println("    ✓ 重启指令已发送")
 	}
 
-	// 等待设备重连
 	for i := 5; i > 0; i-- {
 		fmt.Printf("\r    等待重连... %ds  ", i)
 		time.Sleep(1 * time.Second)
@@ -370,9 +357,25 @@ func runInteractiveFlash(d *discoveredDevice, reader *bufio.Reader) error {
 	return nil
 }
 
-// sendHidReset 通过 HID 接口发送 CMD_RESET 命令重启手柄。
-// 原版 APK Bt_Ops.requestReboot(): requestData(CMD_RESET, 1)。
-// 设备收到后会断开蓝牙并重新连接。
+// checkBatteryRaw 通过 HID 查询手柄电量原始 ADC 值。
+// 返回 0-255 的原始值，供调用方自行判断电量水平。
+func checkBatteryRaw() (int, error) {
+	client, err := hid.OpenWindowsHidClient()
+	if err != nil {
+		return 0, fmt.Errorf("打开 HID 设备: %w", err)
+	}
+	defer client.Close()
+
+	data, err := client.SendCommand(hid.CmdBatteryState, nil)
+	if err != nil {
+		return 0, fmt.Errorf("电池查询: %w", err)
+	}
+	if len(data) < 1 {
+		return 0, fmt.Errorf("电池: 空响应")
+	}
+	return int(data[0]), nil
+}
+
 func sendHidReset() error {
 	client, err := hid.OpenWindowsHidClient()
 	if err != nil {
@@ -382,14 +385,11 @@ func sendHidReset() error {
 
 	_, err = client.SendCommand(hid.CmdReset, []byte{0x01})
 	if err != nil {
-		// 重启后设备会立即断开，ReadFile 超时属正常
-		// 只要 WriteFile 成功，命令就已经发出
 		return nil
 	}
 	return nil
 }
 
-// versionDirection 比较版本号，返回 "降级"/"升级"/"平刷"。
 func versionDirection(current, target string) string {
 	if current == "" {
 		return "未知"
@@ -403,7 +403,6 @@ func versionDirection(current, target string) string {
 	return "降级"
 }
 
-// truncate 截断字符串到指定显示宽度（中文字符占 2 宽）。
 func truncate(s string, maxDisplay int) string {
 	displayWidth := 0
 	result := []rune(s)

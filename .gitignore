@@ -1,6 +1,3 @@
-blkz/*/
-logs/
-decompiled/*
-Release/blkz/*/
+Release/logs/
+Release/blkz/
 Release/tsct.exe
-Release/blkz

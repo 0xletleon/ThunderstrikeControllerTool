@@ -88,6 +88,19 @@ func printBluetoothDeviceInfo(d *discoveredDevice) {
 	}
 
 	printInfoLine("传输方式", "蓝牙 HID")
+
+	// 查询电量
+	battData, err := client.SendCommand(hid.CmdBatteryState, nil)
+	if err != nil {
+		printInfoLine("电量", fmt.Sprintf("读取失败 (%v)", err))
+	} else if len(battData) >= 1 {
+		raw := int(battData[0])
+		pct := adcToPercent(raw)
+		level := batteryLevelText(pct)
+		printInfoLine("电量", fmt.Sprintf("%d%%  ADC: %d (%s)", pct, raw, level))
+	} else {
+		printInfoLine("电量", "数据不足")
+	}
 }
 
 // printInfoLine 打印一行 "    标签      值"。
@@ -124,4 +137,36 @@ func runeWidth(r rune) int {
 		return 2
 	}
 	return 1
+}
+
+// adcToPercent 将原始 ADC 值（0-255）转换为电池电量百分比。
+//
+// 电池参数：2×NiMH LSD 串联，标称 2.4V DC，1900mAh。
+// 电压范围 2.0V（空）~ 2.8V（满），CSR ADC 参考电压 3.3V。
+//
+//	ADC 空电 ≈ 2.0/3.3×255 = 155
+//	ADC 满电 ≈ 2.8/3.3×255 = 216
+func adcToPercent(raw int) int {
+	const (
+		adcEmpty = 155 // 2.0V — 0%
+		adcFull  = 216 // 2.8V — 100%
+	)
+	if raw <= adcEmpty {
+		return 0
+	}
+	if raw >= adcFull {
+		return 100
+	}
+	return (raw - adcEmpty) * 100 / (adcFull - adcEmpty)
+}
+
+// batteryLevelText 将电量百分比转换为可读描述。
+func batteryLevelText(pct int) string {
+	if pct < 20 {
+		return "偏低"
+	}
+	if pct < 50 {
+		return "中等"
+	}
+	return "正常"
 }

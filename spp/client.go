@@ -5,28 +5,26 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"go.bug.st/serial"
 )
 
 // Response represents a response packet received from the controller.
 type Response struct {
-	CommandCode  CommandCode
-	StatusCode   StatusCode
-	Payload      []byte
+	CommandCode CommandCode
+	StatusCode  StatusCode
+	Payload     []byte
 }
 
 // Client manages an SPP connection to the Thunderstrike controller.
-// It provides methods for sending commands and reading responses
-// over a Bluetooth SPP (RFCOMM) serial connection.
 type Client struct {
-	port       io.ReadWriteCloser
+	port       serial.Port
 	timeout    time.Duration
 	totalBytes int
 }
 
 // NewClient creates a new SPP client from an established serial connection.
-// The port parameter should be an open serial port connected to the
-// controller's SPP service.
-func NewClient(port io.ReadWriteCloser) *Client {
+func NewClient(port serial.Port) *Client {
 	return &Client{
 		port:    port,
 		timeout: time.Duration(TimeoutDefaultMs) * time.Millisecond,
@@ -47,7 +45,6 @@ func (c *Client) Close() error {
 }
 
 // WriteCommand sends a command packet to the controller.
-// The packet format is: [CommandCode] [2-byte LE length] [data...]
 func (c *Client) WriteCommand(code CommandCode, data []byte) error {
 	buf := make([]byte, 3+len(data))
 	buf[0] = byte(code)
@@ -61,19 +58,30 @@ func (c *Client) WriteCommand(code CommandCode, data []byte) error {
 	if n != len(buf) {
 		return fmt.Errorf("spp write %s: short write %d/%d", code, n, len(buf))
 	}
+	c.totalBytes += n
 	return nil
 }
 
 // ReadResponse reads a response packet from the controller.
-// It loops to skip STATUS_CMD_IN_PROGRESS responses.
-// Packet format: [CommandCode] [StatusCode] [payload_len] [payload...]
+// Loops to skip IN_PROGRESS responses. Enforces an overall deadline.
 func (c *Client) ReadResponse() (*Response, error) {
+	deadline := time.Now().Add(c.timeout)
+
 	for {
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("spp read response: timeout after %v", c.timeout)
+		}
+
+		remaining := time.Until(deadline)
+		if remaining < 500*time.Millisecond {
+			remaining = 500 * time.Millisecond
+		}
+		c.port.SetReadTimeout(remaining)
+
 		resp, err := c.readOneResponse()
 		if err != nil {
 			return nil, err
 		}
-		// Skip "in progress" responses and wait for final status.
 		if resp.StatusCode.IsRetryable() {
 			continue
 		}
@@ -85,7 +93,6 @@ func (c *Client) ReadResponse() (*Response, error) {
 func (c *Client) readOneResponse() (*Response, error) {
 	header := make([]byte, 3)
 
-	// Read 3-byte header: [cmd_code] [status_code] [payload_len]
 	if _, err := io.ReadFull(c.port, header); err != nil {
 		return nil, fmt.Errorf("spp read header: %w", err)
 	}
@@ -94,7 +101,6 @@ func (c *Client) readOneResponse() (*Response, error) {
 	statusCode := StatusCode(header[1])
 	payloadLen := int(header[2])
 
-	// Read payload
 	payload := make([]byte, payloadLen)
 	if payloadLen > 0 {
 		if _, err := io.ReadFull(c.port, payload); err != nil {
@@ -110,14 +116,26 @@ func (c *Client) readOneResponse() (*Response, error) {
 }
 
 // ExecuteCommand sends a command and waits for the matching response.
-// It retries reading until the response's CommandCode matches the sent command.
+// Uses ReadResponse which automatically skips IN_PROGRESS status codes.
 func (c *Client) ExecuteCommand(code CommandCode, data []byte) (*Response, error) {
 	if err := c.WriteCommand(code, data); err != nil {
 		return nil, err
 	}
 
-	// Read responses until we get one matching our command code.
+	deadline := time.Now().Add(c.timeout)
+
 	for {
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("spp execute %s: timeout after %v", code, c.timeout)
+		}
+
+		remaining := time.Until(deadline)
+		if remaining < 500*time.Millisecond {
+			remaining = 500 * time.Millisecond
+		}
+		c.port.SetReadTimeout(remaining)
+
+		// ReadResponse skips IN_PROGRESS internally.
 		resp, err := c.ReadResponse()
 		if err != nil {
 			return nil, err
@@ -125,35 +143,26 @@ func (c *Client) ExecuteCommand(code CommandCode, data []byte) (*Response, error
 		if resp.CommandCode == code {
 			return resp, nil
 		}
-		// Mismatched response code, keep reading.
+		// Mismatched response code, keep reading (command echo from previous
+		// pending operations).
 	}
 }
 
 // Connect performs the SPP handshake (NOP command).
-// Must be called after establishing the serial connection.
-//
-// The original app sends NOP twice:
-//  1. WriteCommand(NOP) — wake up the controller
-//  2. ExecuteCommand(NOP) — confirm handshake (WriteCommand + ReadResponse)
-//
-// Timeout is 5000ms (0x1388 in smali).
 func (c *Client) Connect() error {
 	c.SetTimeout(time.Duration(TimeoutNopMs) * time.Millisecond)
 
-	// Step 1: Wake up the controller with a bare WriteCommand (no response read).
 	if err := c.WriteCommand(CmdNop, nil); err != nil {
 		return fmt.Errorf("spp connect (NOP wake): %w", err)
 	}
 
-	// Step 2: ExecuteCommand (WriteCommand + ReadResponse) to confirm handshake.
 	resp, err := c.ExecuteCommand(CmdNop, nil)
 	if err != nil {
 		return fmt.Errorf("spp connect (NOP handshake): %w", err)
 	}
 
 	if !resp.StatusCode.IsOk() {
-		return fmt.Errorf("spp connect: handshake failed with status %s",
-			resp.StatusCode)
+		return fmt.Errorf("spp connect: handshake failed with status %s", resp.StatusCode)
 	}
 
 	return nil

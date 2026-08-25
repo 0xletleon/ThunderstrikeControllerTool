@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	"thunderstrike-controller-tool/hid"
 	"thunderstrike-controller-tool/term"
 )
 
@@ -111,37 +112,58 @@ func printHeader() {
 
 // printDeviceTable 打印设备列表（分隔式，无框线）。
 func printDeviceTable(devices []discoveredDevice) {
-	fmt.Println("    No.  设备名称             端口    MAC 地址")
-	fmt.Println("    ─────────────────────────────────────────────")
+	fmt.Println("    No.  设备名称                      端口    MAC 地址")
+	fmt.Println("    ──────────────────────────────────────────────────")
 	for _, d := range devices {
-		fmt.Printf("     %d    %-18s %-6s   %s\n",
+		fmt.Printf("     %d    %-24s %-6s   %s\n",
 			d.index, d.deviceName, d.port, d.mac)
 	}
 }
 
-// scanBluetoothSpp 通过 WMI 查询蓝牙 SPP 串口。
-// 使用 Get-WmiObject Win32_SerialPort 查找 BTHENUM 端口，
-// 提取 MAC 地址，瞬时完成，无需串口探测。
+// scanBluetoothSpp 通过 WMI 查询蓝牙 SPP 串口，并通过 HID 获取固件版本。
 func scanBluetoothSpp() ([]discoveredDevice, error) {
 	btPorts, err := discoverBtComPorts()
 	if err != nil {
 		return nil, err
 	}
 
+	// 查询 HID 获取固件版本（供设备信息页显示用）
+	fwVer := queryHidFirmwareVersion()
+
 	var devices []discoveredDevice
 	idx := 1
 	for _, bp := range btPorts {
-		name := fmt.Sprintf("%s  %s  (%s)", bp.deviceName(), bp.comPort, bp.macColon)
+		// 使用 Windows 蓝牙友好名称（如 "NVIDIA Controller v01.04"）
+		devName := bp.deviceName()
+		name := fmt.Sprintf("%s  %s  (%s)", devName, bp.comPort, bp.macColon)
 		devices = append(devices, discoveredDevice{
 			index:      idx,
 			name:       name,
 			port:       bp.comPort,
 			mac:        bp.macColon,
-			deviceName: bp.deviceName(),
+			deviceName: devName,
+			fwVersion:  fwVer,
 		})
 		idx++
 	}
 	return devices, nil
+}
+
+// queryHidFirmwareVersion 通过 HID 快速查询固件版本号，失败返回空字符串。
+func queryHidFirmwareVersion() string {
+	client, err := hid.OpenWindowsHidClient()
+	if err != nil {
+		return ""
+	}
+	defer client.Close()
+
+	verData, err := client.SendCommand(hid.CmdVersion, nil)
+	if err != nil || len(verData) < 2 {
+		return ""
+	}
+	major := int(verData[1])
+	minor := int(verData[0])
+	return fmt.Sprintf("%d.%02d", major, minor)
 }
 
 // printDeviceInfo 显示选中设备的信息，然后提示刷写。

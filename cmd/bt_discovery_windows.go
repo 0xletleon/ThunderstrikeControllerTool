@@ -35,19 +35,86 @@ const (
 
 // btComPort represents a Bluetooth SPP outgoing COM port discovered via WMI.
 type btComPort struct {
-	comPort  string // e.g. "COM3"
-	mac      string // 12-digit hex MAC, e.g. "00044B9204F4"
-	macColon string // formatted MAC, e.g. "00:04:4B:92:04:F4"
-	vid      string // vendor ID, e.g. "00020955" (NVIDIA)
-	pid      string // product ID, e.g. "7214" (Thunderstrike)
+	comPort    string // e.g. "COM3"
+	mac        string // 12-digit hex MAC, e.g. "00044B9204F4"
+	macColon   string // formatted MAC, e.g. "00:04:4B:92:04:F4"
+	vid        string // vendor ID, e.g. "00020955" (NVIDIA)
+	pid        string // product ID, e.g. "7214" (Thunderstrike)
+	btName     string // Bluetooth friendly name, e.g. "NVIDIA Controller v01.04"
 }
 
-// deviceName returns a human-readable device name based on VID/PID.
+// deviceName returns the Bluetooth friendly name from Windows, or
+// falls back to VID/PID-based name if not available.
 func (b btComPort) deviceName() string {
+	if b.btName != "" {
+		return b.btName
+	}
 	if b.vid == vidNvidia && b.pid == pidThunderstrike {
 		return "NVIDIA Controller"
 	}
 	return "蓝牙设备"
+}
+
+// queryBtDeviceName queries Windows for the Bluetooth device friendly name
+// by MAC address (colon-separated format, e.g. "00:04:4B:92:04:F4").
+// Returns the friendly name or empty string if not found.
+func queryBtDeviceName(macColon string) string {
+	// Query the Bluetooth device registry. Paired Bluetooth device names are
+	// stored under BTHPORT\Parameters\Devices\<MAC_without_colons>.
+	// The Name value is REG_BINARY (ASCII bytes as hex).
+	macNoColon := strings.ReplaceAll(macColon, ":", "")
+	regPath := fmt.Sprintf(
+		`HKLM\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\%s`,
+		macNoColon,
+	)
+
+	cmd := exec.Command("reg", "query", regPath, "/v", "Name")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	// "reg query" output format:
+	//       Name    REG_BINARY    4E5649444941...0000
+	// Parse the hex bytes after "REG_BINARY" and decode as UTF-16LE.
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "REG_BINARY") {
+			parts := strings.SplitN(line, "REG_BINARY", 2)
+			if len(parts) == 2 {
+				hexStr := strings.ReplaceAll(strings.TrimSpace(parts[1]), " ", "")
+				return decodeRegistryNameHex(hexStr)
+			}
+		}
+		// Fallback: some systems may use REG_SZ
+		if strings.Contains(line, "REG_SZ") {
+			parts := strings.SplitN(line, "REG_SZ", 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1])
+			}
+		}
+	}
+	return ""
+}
+
+// decodeRegistryNameHex decodes a hex string from REG_BINARY Name value
+// to a Go string. The hex bytes are typically ASCII-encoded with a null
+// terminator (0x00). Reads 2 hex chars per byte, stops at null byte.
+func decodeRegistryNameHex(hexStr string) string {
+	if len(hexStr)%2 != 0 {
+		return ""
+	}
+	var runes []rune
+	for i := 0; i+1 < len(hexStr); i += 2 {
+		var b byte
+		fmt.Sscanf(hexStr[i:i+2], "%02X", &b)
+		if b == 0 {
+			break // null terminator
+		}
+		runes = append(runes, rune(b))
+	}
+	return string(runes)
 }
 
 // discoverBtComPorts queries WMI for Bluetooth SPP serial ports.
@@ -96,12 +163,18 @@ func discoverBtComPorts() ([]btComPort, error) {
 			continue
 		}
 
+		macFmt := formatMacColon(mac)
+
+		// Query Bluetooth friendly name from Windows
+		btName := queryBtDeviceName(macFmt)
+
 		ports = append(ports, btComPort{
-			comPort:  deviceID,
-			mac:      mac,
-			macColon: formatMacColon(mac),
-			vid:      vid,
-			pid:      pid,
+			comPort:    deviceID,
+			mac:        mac,
+			macColon:   macFmt,
+			vid:        vid,
+			pid:        pid,
+			btName:     btName,
 		})
 	}
 
