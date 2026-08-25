@@ -28,11 +28,6 @@ func NewFirmwareListModel(firmwares []FirmwareInfo) FirmwareListModel {
 	}
 }
 
-// SetError 设置错误消息。
-func (m *FirmwareListModel) SetError(msg string) {
-	m.errMsg = msg
-}
-
 // Update 处理固件列表视图的消息。
 func (m FirmwareListModel) Update(msg tea.Msg) (FirmwareListModel, tea.Cmd) {
 	switch msg := msg.(type) {

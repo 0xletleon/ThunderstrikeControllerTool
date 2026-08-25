@@ -91,10 +91,6 @@ var NormalItemStyle = lipgloss.NewStyle().
 var SeparatorStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color(colorDim))
 
-// 进度条样式
-var ProgressStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.Color(colorAccent))
-
 // 步骤标签样式
 var StepLabelStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color(colorAccent)).
@@ -107,17 +103,6 @@ var StepDoneStyle = lipgloss.NewStyle().
 // 步骤等待样式
 var StepPendingStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color(colorDim))
-
-// ConfirmPrompt 样式
-var ConfirmPromptStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.Color(colorWarning)).
-	Bold(true)
-
-// BoxStyle 带边框的容器样式
-var BoxStyle = lipgloss.NewStyle().
-	BorderStyle(lipgloss.RoundedBorder()).
-	BorderForeground(lipgloss.Color(colorPrimary)).
-	Padding(1, 2)
 
 // ErrorBoxStyle 错误容器样式
 var ErrorBoxStyle = lipgloss.NewStyle().

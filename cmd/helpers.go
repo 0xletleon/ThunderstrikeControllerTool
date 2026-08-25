@@ -96,15 +96,15 @@ func checkBatteryRaw() (int, error) {
 }
 
 // sendHidReset 通过 HID 发送重启指令。
-func sendHidReset() error {
+// APPLY_OTA 已触发重启，HID reset 失败不影响刷写结果，故吞掉 error。
+func sendHidReset() {
 	client, err := hid.OpenWindowsHidClient()
 	if err != nil {
-		return fmt.Errorf("打开 HID 设备: %w", err)
+		return
 	}
 	defer client.Close()
 
-	_, err = client.SendCommand(hid.CmdReset, []byte{0x01})
-	return err
+	_, _ = client.SendCommand(hid.CmdReset, []byte{0x01})
 }
 
 // versionDirection 判断固件版本是升级、降级还是平刷。

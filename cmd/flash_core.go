@@ -86,20 +86,6 @@ func getOtaData(blkz *firmware.BlkzFile, entryIdx int) ([]byte, int, error) {
 	return data, len(data), nil
 }
 
-// printFlashSummary 打印刷写前的摘要信息。
-func printFlashSummary(blkz *firmware.BlkzFile, entryIdx int, port string) {
-	entry := blkz.OtaEntries[entryIdx]
-	fmt.Printf("  串口       : %s\n", port)
-	fmt.Printf("  固件版本   : V%s (0x%s)\n",
-		blkz.Manifest.VersionString(),
-		blkz.Manifest.VersionHex())
-	fmt.Printf("  设备类型   : %s\n", blkz.Manifest.AccessoryType())
-	if blkz.Manifest.IsLocale() && entry.Language != "" {
-		fmt.Printf("  语言       : %s\n", entry.Language)
-	}
-	fmt.Printf("  固件大小   : %d bytes (%.1f KB)\n", len(entry.Data), float64(len(entry.Data))/1024.0)
-}
-
 // bytesReader wraps a byte slice as an io.Reader.
 type bytesReader struct {
 	data []byte

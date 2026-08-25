@@ -217,7 +217,7 @@ func (f *tuiFlasher) ExecuteFlash(
 		return &tui.FlashResultInfo{Success: false, Error: fmt.Sprintf("打开固件: %v", err)}, nil
 	}
 
-	entryIdx := 0
+	entryIdx := fw.LanguageIndex
 	otaData, otaSize, err := getOtaData(blkz, entryIdx)
 	if err != nil {
 		return &tui.FlashResultInfo{Success: false, Error: fmt.Sprintf("获取固件数据: %v", err)}, nil
@@ -287,20 +287,28 @@ func (f *tuiFlasher) ExecuteFlash(
 			fwLog.LogFlashSuccess("V"+device.FwVersion, "V"+fw.Version, elapsed, otaSize)
 
 			// 记录刷写后设备信息（含电量）
+			// 注意：手柄此时可能正在重启，HID 查询可能失败
 			rawBatt, battErr := checkBatteryRaw()
-			battPct, battLevel := 0, ""
 			if battErr == nil {
-				battPct = adcToPercent(rawBatt)
-				battLevel = batteryLevelText(battPct)
+				battPct := adcToPercent(rawBatt)
+				battLevel := batteryLevelText(battPct)
+				fwLog.LogDeviceInfo("刷写后", logger.DeviceInfo{
+					Name:         device.DeviceName,
+					MAC:          device.MAC,
+					FwVersion:    fw.Version,
+					BatteryPct:   battPct,
+					BatteryRaw:   rawBatt,
+					BatteryLevel: battLevel,
+				})
+			} else {
+				// HID 已断开（手柄重启中），仅记录基本信息
+				fwLog.LogDeviceInfo("刷写后", logger.DeviceInfo{
+					Name:      device.DeviceName,
+					MAC:       device.MAC,
+					FwVersion: fw.Version,
+				})
+				fwLog.LogRaw("  (电量: 设备重启中，无法查询)")
 			}
-			fwLog.LogDeviceInfo("刷写后", logger.DeviceInfo{
-				Name:         device.DeviceName,
-				MAC:          device.MAC,
-				FwVersion:    fw.Version,
-				BatteryPct:   battPct,
-				BatteryRaw:   rawBatt,
-				BatteryLevel: battLevel,
-			})
 		}
 	}
 
@@ -318,8 +326,8 @@ func (f *tuiFlasher) ExecuteFlash(
 		}, nil
 	}
 
-	// 发送 HID 重启指令
-	_ = sendHidReset()
+	// 发送 HID 重启指令（APPLY_OTA 已触发重启，此处是补充）
+	sendHidReset()
 
 	return &tui.FlashResultInfo{
 		Success:   true,

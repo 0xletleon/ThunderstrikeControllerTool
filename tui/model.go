@@ -17,12 +17,13 @@ import (
 type TUIState int
 
 const (
-	StateScanning   TUIState = iota // 正在扫描设备
-	StateDeviceList                 // 设备列表
-	StateDeviceInfo                 // 设备信息
-	StateFirmwareList               // 固件列表
-	StateFlashing                   // 刷写中
-	StateFlashDone                  // 刷写完成
+	StateScanning      TUIState = iota // 正在扫描设备
+	StateDeviceList                    // 设备列表
+	StateDeviceInfo                    // 设备信息
+	StateFirmwareList                  // 固件列表
+	StateLanguageSelect                // 多语言固件选择语言
+	StateFlashing                      // 刷写中
+	StateFlashDone                     // 刷写完成
 )
 
 // DeviceScanner 设备扫描接口（由 cmd 包实现）。
@@ -61,6 +62,7 @@ type Model struct {
 	deviceList  DeviceListModel
 	deviceInfo  DeviceInfoModel
 	fwList      FirmwareListModel
+	langSelect  LanguageSelectModel
 	flashProg   FlashProgressModel
 
 	// 当前选中
@@ -117,6 +119,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case StateFirmwareList:
 		return m.handleFirmwareListState(msg)
+
+	case StateLanguageSelect:
+		return m.handleLanguageSelectState(msg)
 
 	case StateFlashing, StateFlashDone:
 		return m.handleFlashingState(msg)
@@ -224,9 +229,16 @@ func (m Model) handleFirmwareListState(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case FirmwareSelectedMsg:
-		// 用户选择了固件，进入刷写
+		// 用户选择了固件
 		fw := msg.Firmware
 		m.selectedFirmware = &fw
+		if fw.IsLocale && len(fw.Languages) > 1 {
+			// 多语言固件：先进入语言选择
+			m.langSelect = NewLanguageSelectModel(fw)
+			m.state = StateLanguageSelect
+			return m, nil
+		}
+		// 普通固件：直接刷写
 		m.flashProg = NewFlashProgressModel()
 		m.state = StateFlashing
 		return m, startFlashCmd(m.flasher, *m.selectedDevice, fw)
@@ -246,6 +258,36 @@ func (m Model) handleFirmwareListState(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	newFw, cmd := m.fwList.Update(msg)
 	m.fwList = newFw
+	return m, cmd
+}
+
+// handleLanguageSelectState 处理语言选择状态的消息。
+func (m Model) handleLanguageSelectState(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+
+	case LanguageSelectedMsg:
+		// 用户选择了语言，进入刷写
+		fw := msg.Firmware
+		m.selectedFirmware = &fw
+		m.flashProg = NewFlashProgressModel()
+		m.state = StateFlashing
+		return m, startFlashCmd(m.flasher, *m.selectedDevice, fw)
+
+	case tea.KeyMsg:
+		newLang, cmd := m.langSelect.Update(msg)
+		m.langSelect = newLang
+
+		if newLang.IsQuitting() {
+			// 返回固件列表
+			m.state = StateFirmwareList
+			return m, nil
+		}
+
+		return m, cmd
+	}
+
+	newLang, cmd := m.langSelect.Update(msg)
+	m.langSelect = newLang
 	return m, cmd
 }
 
@@ -312,6 +354,10 @@ func (m Model) handleCurrentViewResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cm
 		newFw, cmd := m.fwList.Update(msg)
 		m.fwList = newFw
 		return m, cmd
+	case StateLanguageSelect:
+		newLang, cmd := m.langSelect.Update(msg)
+		m.langSelect = newLang
+		return m, cmd
 	case StateFlashing, StateFlashDone:
 		newFlash, cmd := m.flashProg.Update(msg)
 		m.flashProg = newFlash
@@ -340,6 +386,9 @@ func (m Model) View() string {
 
 	case StateFirmwareList:
 		return m.fwList.View()
+
+	case StateLanguageSelect:
+		return m.langSelect.View()
 
 	case StateFlashing, StateFlashDone:
 		return m.flashProg.View()
@@ -387,18 +436,9 @@ func scanFirmwaresCmd(fwScanner FirmwareScanner) tea.Cmd {
 // 通过 stepCB 和 progressCB 将刷写进度转为 TUI 消息。
 func startFlashCmd(flasher Flasher, device DeviceInfo, fw FirmwareInfo) tea.Cmd {
 	return func() tea.Msg {
-		// 注意：由于 tea.Cmd 在 goroutine 中执行，我们无法直接发送多条消息。
-		// 需要使用 tea.Batch 的方式 — 但 Cmd 只能返回一个 Msg。
-		// 因此这里采用同步执行 + 最终结果的方式。
-		// 进度回调无法直接发消息给 TUI（因为不在同一个 goroutine 中）。
-		// 解决方案：使用 tea.Program.Send 从回调中发送消息。
-		// 但 tea.Program 需要通过 ProgramOption 传入。
-		// 这里简化处理：只返回最终结果。
-		result, _ := flasher.ExecuteFlash(
+		result, flashErr := flasher.ExecuteFlash(
 			device, fw,
 			func(step, total int, name string) {
-				// Step callback — 需要通过 Program.Send 发送
-				// 这里通过全局 Program 发送消息
 				if globalProgram != nil {
 					globalProgram.Send(StepUpdateMsg{Step: step, Total: total, Name: name})
 				}
@@ -414,6 +454,9 @@ func startFlashCmd(flasher Flasher, device DeviceInfo, fw FirmwareInfo) tea.Cmd 
 			},
 		)
 
+		if flashErr != nil {
+			return FlashFailedMsg{Error: flashErr.Error()}
+		}
 		if result != nil && result.Success {
 			return FlashCompleteMsg{Result: result}
 		}

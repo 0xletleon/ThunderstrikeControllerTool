@@ -43,6 +43,7 @@ type FirmwareInfo struct {
 	CsExpected string // 期望 MD5
 	IsLocale  bool   // 是否多语言固件
 	Languages []string // 语言列表
+	LanguageIndex int // 选中的语言索引（多语言固件使用，默认 0）
 	OtaSize   int    // 固件大小(bytes)
 }
 

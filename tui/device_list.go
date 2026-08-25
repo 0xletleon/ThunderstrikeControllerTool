@@ -31,16 +31,6 @@ func NewDeviceListModel(devices []DeviceInfo) DeviceListModel {
 	}
 }
 
-// SetScanning 设置扫描状态。
-func (m *DeviceListModel) SetScanning(scanning bool) {
-	m.scanning = scanning
-}
-
-// SetError 设置错误消息。
-func (m *DeviceListModel) SetError(msg string) {
-	m.errMsg = msg
-}
-
 // Update 处理设备列表视图的消息。
 func (m DeviceListModel) Update(msg tea.Msg) (DeviceListModel, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -133,7 +123,7 @@ func (m DeviceListModel) View() string {
 	// 设备列表
 	for i, d := range m.devices {
 		name := truncateDisplay(d.DeviceName, 24)
-		line := fmt.Sprintf(" %s  %s  %s  %s  V%s",
+		line := fmt.Sprintf("  %s  %s  %s  %s  V%s",
 			padRight(fmt.Sprintf("%d", d.Index), 4),
 			padRight(name, 24),
 			padRight(d.Port, 8),

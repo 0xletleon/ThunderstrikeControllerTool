@@ -123,7 +123,6 @@ func (m DeviceInfoModel) View() string {
 	b.WriteString("\n")
 	b.WriteString("  " + renderSeparator(70) + "\n\n")
 	b.WriteString("  f 刷写固件 | ESC/q 返回设备列表")
-	
 
 	return b.String()
 }

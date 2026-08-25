@@ -6,7 +6,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -35,9 +34,4 @@ func Run(scanner DeviceScanner, fwScanner FirmwareScanner, flasher Flasher) erro
 	}
 
 	return nil
-}
-
-// printError 在终端打印错误消息（非 TUI 模式）。
-func printError(msg string) {
-	fmt.Fprintf(os.Stderr, "错误: %s\n", msg)
 }

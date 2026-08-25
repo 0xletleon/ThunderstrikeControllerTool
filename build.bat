@@ -29,4 +29,3 @@ echo.
 echo   Output: Release\tsct.exe
 echo   Files copied to Release\
 echo.
-pause

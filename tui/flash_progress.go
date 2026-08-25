@@ -6,6 +6,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -35,6 +37,15 @@ func defaultSteps() []FlashStep {
 	return steps
 }
 
+// 步骤索引常量（1-based）。
+const (
+	stepConnect  = 1 // 连接握手
+	stepErase    = 2 // 擦除闪存
+	stepWrite    = 3 // 写入数据
+	stepValidate = 4 // 校验数据
+	stepApply    = 5 // 应用固件
+)
+
 // NewFlashProgressModel 创建刷写进度模型。
 func NewFlashProgressModel() FlashProgressModel {
 	p := progress.New(
@@ -54,7 +65,12 @@ func (m FlashProgressModel) Update(msg tea.Msg) (FlashProgressModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.progress.Width = msg.Width - 10
+		// 防止窗口过窄时 progress.Width 为负数
+		w := msg.Width - 10
+		if w < 10 {
+			w = 10
+		}
+		m.progress.Width = w
 		return m, nil
 
 	case tea.KeyMsg:
@@ -65,10 +81,10 @@ func (m FlashProgressModel) Update(msg tea.Msg) (FlashProgressModel, tea.Cmd) {
 		}
 
 	case StepUpdateMsg:
-		// 更新当前步骤
+		// StepCallback 在步骤**开始**时调用，标记前一个步骤为完成
 		m.currentStep = msg.Step - 1
-		if m.currentStep >= 0 && m.currentStep < len(m.steps) {
-			m.steps[m.currentStep].Done = true
+		if m.currentStep > 0 && m.currentStep-1 < len(m.steps) {
+			m.steps[m.currentStep-1].Done = true
 		}
 		return m, nil
 
@@ -142,7 +158,7 @@ func (m FlashProgressModel) View() string {
 	b.WriteString("\n")
 
 	// 渲染写入进度条（仅在写入阶段）
-	if m.currentStep == 2 || m.progressInfo.TotalBytes > 0 { // Step 3 = 写入数据
+	if m.currentStep == stepWrite-1 || m.progressInfo.TotalBytes > 0 {
 		b.WriteString("  " + m.progress.View() + "\n")
 		if m.progressInfo.TotalBytes > 0 {
 			b.WriteString(fmt.Sprintf("  %d/%d bytes (%d%%)\n",
@@ -157,12 +173,13 @@ func (m FlashProgressModel) View() string {
 	// 刷写结果
 	if m.done {
 		if m.result != nil && m.result.Success {
+			logPath := relativePath(m.result.LogPath)
 			b.WriteString(SuccessBoxStyle.Render(
 				"✓ 刷写成功\n\n" +
 					renderInfoLine("耗时", m.result.Elapsed) + "\n" +
 					renderInfoLine("写入", fmt.Sprintf("%d bytes", m.result.BytesWrit)) + "\n" +
 					renderInfoLine("固件", fmt.Sprintf("V%s → V%s", m.result.FromVer, m.result.ToVer)) + "\n" +
-					renderInfoLine("日志", m.result.LogPath)))
+					renderInfoLine("日志", logPath)))
 			b.WriteString("\n\n")
 			b.WriteString(DimStyle.Render("  正在重启手柄..."))
 			b.WriteString("\n")
@@ -212,4 +229,21 @@ type FlashCompleteMsg struct {
 // FlashFailedMsg 刷写失败消息。
 type FlashFailedMsg struct {
 	Error string
+}
+
+// relativePath 将绝对路径转换为相对于当前工作目录的相对路径。
+// 如果转换失败或路径为空，则原样返回。
+func relativePath(path string) string {
+	if path == "" {
+		return path
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return path
+	}
+	rel, err := filepath.Rel(wd, path)
+	if err != nil {
+		return path
+	}
+	return rel
 }
