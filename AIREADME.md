@@ -71,10 +71,45 @@ Go 语言编写，仅支持 Windows，通过蓝牙连接手柄。
 
 | 命令 | Code | 说明 |
 |------|------|------|
-| VERSION | 0x01 | 返回 `[fw_minor][fw_major][csr_minor][csr_major][hw_minor][hw_major]` |
+| VERSION | 0x01 | 返回 6 字节 `[fw_minor][fw_major][csr_minor][csr_major][hot_minor][hot_major]` |
+| BATTERY_STATE | 0x07 | 返回电池完整状态（见下方电池响应格式） |
 | MAC_ADDRESS | 0x0B | 返回 6 字节 MAC |
-| BOARD_INFO | 0x10 | 返回 `[board_type][board_rev][serial_ascii...]` |
+| BOARD_INFO | 0x10 | 返回序列号（13 字节 ASCII），原版不提取 boardType/boardRev |
 | RESET | 0x36 | 重启设备，参数 `[0x01]`（对应 `Bt_Ops.requestReboot()`） |
+
+> **注意**：VERSION 响应中的 `version[4]`/`version[5]` 是热词引擎版本（`hot=x.y`），
+> 不是硬件版本。原版 APK 无“硬件版本”概念，BOARD_INFO 仅用于提取序列号。
+
+### HID 电池响应格式（CMD_BATTERY_STATE）
+
+来自 `Bt_Ops.smali` `onReport()` 的 `CMD_BATTERY_STATE` 分支逆向。
+`SendCommand` 返回的 `data[]` 已去掉 3 字节头部，偏移如下：
+
+| data 偏移 | 字段 | 说明 |
+|-----------|------|------|
+| `data[0:2]` | voltage | 小端 `(data[1]<<8) | data[0]` |
+| `data[2]` | batteryLevel | 枚举序号 0-7（见下方分级） |
+| `data[3:5]` | thermistor | 小端 `(data[4]<<8) | data[3]` |
+| `data[5:7]` | esr | 小端 `(data[6]<<8) | data[5]` |
+| `data[11]` | **percent** | **真正的电量百分比 0-100** |
+| `data[12]` | reserve | 非 0 = 储备电量 |
+
+> `batteryLevel` 和 `percent` 是固件独立返回的两个字段，不保证一致。
+> 例如固件可能返回 `percent=99` 但 `batteryLevel=5`(GOOD_60)。
+> 本工具仅显示 `percent`，不使用 `batteryLevel` 分级。
+
+原版 `BatteryLevel$Classic` 枚举（来自 `BatteryLevel$Classic.smali`）：
+
+| 枚举 | ordinal | max percent |
+|------|---------|-------------|
+| UNKNOWN | 0 | -1 (sentinel) |
+| RESERVE | 1 | 0 |
+| EMPTY | 2 | 5 |
+| LOW | 3 | 20 |
+| GOOD_40 | 4 | 40 |
+| GOOD_60 | 5 | 60 |
+| GOOD_80 | 6 | 80 |
+| FULL | 7 | 100 |
 
 ## 设备发现（WMI）
 
@@ -112,7 +147,7 @@ PC 端无法自动重连蓝牙，本工具的策略：
 原版 APK `Bt_Ops.requestReboot()` 调用 `requestData(CMD_RESET, 1)`。
 实测确认：发送后设备断开约 1 秒，然后自动重连。
 
-实现见 `cmd/interactive_flash.go` 的 `sendHidReset()`：
+实现见 `cmd/helpers.go` 的 `sendHidReset()`：
 - 打开 HID 设备 → `SendCommand(CmdReset, [0x01])`
 - 设备收到后立即断开，`ReadFile` 超时属正常，只要 `WriteFile` 成功即可
 
@@ -191,35 +226,47 @@ nv-recovery-image-shield-2017-atv-9.2.1\vendor.ext4\oem\firmware\
 
 ```
 ThunderstrikeControllerTool/
-├── main.go                         # 程序入口，注册 cobra 命令
-├── cmd/                            # CLI 命令
-│   ├── root.go                     # 根命令
-│   ├── scan.go                     # scan — 扫描蓝牙 SPP 串口
-│   ├── bt_discovery_windows.go     # WMI 查询蓝牙 SPP COM 口
-│   ├── bt_info.go                  # 设备信息读取（Windows HID API）
-│   ├── interactive.go              # 交互模式入口
-│   ├── interactive_flash.go        # 交互模式刷写流程 + sendHidReset
-│   ├── flash.go                    # flash — 命令行刷写
+├── main.go                         # 程序入口
+├── cmd/                            # 业务逻辑层
+│   ├── tui_adapter.go              # TUI 接口适配器（设备扫描、HID 查询、刷写）
 │   ├── flash_core.go               # 刷写核心逻辑（共用）
-│   └── blkz_list.go                # 固件列表显示
-├── hid/                            # HID 协议
-│   ├── commands.go                 # 159 个命令枚举 + 协议常量
-│   └── windows_client.go           # Windows HID API 客户端
-├── spp/                            # 蓝牙 SPP 协议栈
-│   ├── protocol.go                 # 命令码、状态码、超时、UpgradeTimings
-│   ├── client.go                   # SPP 客户端（WriteCommand/ReadResponse/Connect）
-│   ├── flasher.go                  # 刷写流程（NOP→ERASE→WRITE→VALIDATE→APPLY）
-│   └── hidraw_client.go            # [遗留] HID-over-SPP 客户端（已被 HID API 替代）
-├── firmware/                       # 固件解析
-│   ├── blkz.go                     # .blkz 包解析+解压
-│   ├── manifest.go                 # manifest.xml 解析
-│   └── checksum.go                 # MD5 校验
-├── logger/                         # 刷写日志记录
-│   └── logger.go                   # 时间戳日志文件
-├── term/                           # 终端控制
-│   └── term.go                     # ANSI 转义码（清屏、光标等）
-├── Release/                        # 编译打包目录
-│   ├── Release.zip                 # 包含了手柄固件+刷写工具
+│   ├── bt_discovery_windows.go     # WMI 查询蓝牙 SPP COM 口
+│   ├── helpers.go                 # 辅助函数（HID 查询、序列号提取、电池查询）
+│   └── gamepad_monitor.go         # 手柄输入监听适配器
+├── tui/                           # TUI 层（Bubble Tea）
+│   ├── model.go                   # 主状态机（页面切换）
+│   ├── device_list.go             # 设备列表视图（含在线/休眠状态）
+│   ├── device_info_view.go        # 设备信息视图
+│   ├── firmware_list.go           # 固件列表视图
+│   ├── flash_progress.go          # 刷写进度视图
+│   ├── language_select.go         # 多语言固件选择
+│   ├── gamepad_indicator.go        # 手柄输入指示器
+│   ├── styles.go                  # NVIDIA 品牌色样式
+│   ├── ascii_title.go             # ASCII Art 标题
+│   ├── text_align.go              # 中英文对齐工具
+│   ├── types.go                   # 数据传递类型
+│   └── run.go                    # TUI 启动入口
+├── hid/                           # HID 协议
+│   ├── commands.go                # 159 个命令枚举 + 协议常量
+│   ├── windows_client.go          # Windows HID API 客户端 + BatteryInfo 解析
+│   └── input_monitor.go          # HID 输入监听（后台读取输入报告）
+├── spp/                           # 蓝牙 SPP 协议栈
+│   ├── protocol.go                # 命令码、状态码、超时、UpgradeTimings
+│   ├── client.go                  # SPP 客户端（WriteCommand/ReadResponse/Connect）
+│   ├── flasher.go                 # 刷写流程（NOP→ERASE→WRITE→VALIDATE→APPLY）
+│   └── hidraw_client.go           # [遗留] HID-over-SPP 客户端（已被 HID API 替代）
+├── firmware/                      # 固件解析
+│   ├── blkz.go                    # .blkz 包解析+解压
+│   ├── blkz_test.go               # blkz 解析测试
+│   ├── manifest.go                # manifest.xml 解析
+│   └── checksum.go                # MD5 校验（内置 6 个已知固件哈希）
+├── logger/                        # 刷写日志记录
+│   └── logger.go                  # 时间戳日志文件
+├── Release/                       # 编译打包目录
+│   ├── Release.zip                # 包含了手柄固件+刷写工具
+│   ├── tsct.exe                   # 编译产物
+│   ├── blkz/                      # 固件包目录（6 个 .blkz）
+│   └── logs/                      # 刷写日志目录
 ```
 
 ## 逆向分析来源
@@ -232,8 +279,11 @@ nv-recovery-image-shield-2017-atv-9.2.1\vendor.ext4\app\NvAccessories\NvAccessor
 
 | smali 文件 | 提取的信息 |
 |-----------|-----------|
-| `Bt_Ops.smali` | HID 命令格式、`requestData()` 方法、`requestReboot()` |
+| `Bt_Ops.smali` | HID 命令格式、`requestData()`/`onReport()` 方法、`requestReboot()`、电池响应解析 |
 | `Bt_Ops$BtHidrawCommand.smali` | 159 个 HID 命令枚举及 ordinal（0x00–0x9E） |
+| `Bt_Ops$Callbacks.smali` | 回调接口（`onBatteryLevelChange(IIZIII)` 等签名） |
+| `BatteryLevel.smali` | 电池百分比封装、`fromClassic()`/`fromPercent()` |
+| `BatteryLevel$Classic.smali` | 8 级电池分级枚举（UNKNOWN/RESERVE/EMPTY/LOW/GOOD_40/60/80/FULL） |
 | `ThunderstrikeController.smali` | Report 长度（30B）、升级时间参数 |
 | `BtUpdater.smali` | SPP 命令/状态枚举、刷写流程（`sendUpdateCore`） |
 | `BtUpdater$Command.smali` | SPP 命令包格式：`[cmd][2B LE len][data]` |
