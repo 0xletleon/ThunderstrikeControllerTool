@@ -86,13 +86,6 @@ func (m DeviceInfoModel) View() string {
 			b.WriteString("  " + renderInfoLine("热词引擎", m.detail.HotwordVer) + "\n")
 		}
 
-		// 硬件版本
-		boardInfo := ""
-		if m.detail.BoardType > 0 {
-			boardInfo = fmt.Sprintf("Board %d Rev %d", m.detail.BoardType, m.detail.BoardRev)
-			b.WriteString("  " + renderInfoLine("硬件版本", boardInfo) + "\n")
-		}
-
 		// 序列号
 		if m.detail.Serial != "" {
 			b.WriteString("  " + renderInfoLine("序列号", m.detail.Serial) + "\n")
@@ -107,9 +100,11 @@ func (m DeviceInfoModel) View() string {
 		b.WriteString("  " + renderInfoLine("传输方式", "蓝牙 HID") + "\n")
 
 		// 电量
-		if m.detail.BatteryRaw > 0 {
-			battStr := fmt.Sprintf("%d%%  ADC: %d (%s)",
-				m.detail.BatteryPct, m.detail.BatteryRaw, m.detail.BatteryLevel)
+		if m.detail.BatteryPct > 0 {
+			battStr := fmt.Sprintf("%d%%", m.detail.BatteryPct)
+			if m.detail.ReservePower {
+				battStr += " (储备电量)"
+			}
 			b.WriteString("  " + renderInfoLine("电量", battStr) + "\n")
 
 			if m.detail.BatteryPct < 20 {

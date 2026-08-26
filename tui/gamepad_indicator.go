@@ -66,7 +66,7 @@ func (g GamepadIndicator) Update(msg tea.Msg) (GamepadIndicator, tea.Cmd) {
 // 无输入：暗灰色（SubtitleStyle）
 // 有输入：亮绿色粗体（SectionHeaderStyle）
 func (g GamepadIndicator) RenderSubtitle() string {
-	text := "  NVIDIA SHIELD TV 2017 Thunderstrike Controller Tool. @0xletleon V0.2"
+	text := "  NVIDIA SHIELD TV 2017 Thunderstrike Controller Flash Tool. @0xletleon V0.3"
 	if g.active {
 		return SectionHeaderStyle.Render(text)
 	}

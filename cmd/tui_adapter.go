@@ -87,11 +87,9 @@ func (s *tuiDeviceScanner) QueryDeviceDetail(device tui.DeviceInfo) (*tui.Device
 		}
 	}
 
-	// 查询硬件版本 + 序列号
+	// 查询序列号（BOARD_INFO 响应 data[2:] 为 ASCII 序列号）
 	boardData, err := client.SendCommand(hid.CmdBoardInfo, nil)
 	if err == nil && len(boardData) >= 2 {
-		detail.BoardType = int(boardData[0])
-		detail.BoardRev = int(boardData[1])
 		detail.Serial = extractSerial(boardData[2:])
 	}
 
@@ -102,13 +100,10 @@ func (s *tuiDeviceScanner) QueryDeviceDetail(device tui.DeviceInfo) (*tui.Device
 	}
 
 	// 查询电量
-	battData, err := client.SendCommand(hid.CmdBatteryState, nil)
-	if err == nil && len(battData) >= 1 {
-		raw := int(battData[0])
-		pct := adcToPercent(raw)
-		detail.BatteryRaw = raw
-		detail.BatteryPct = pct
-		detail.BatteryLevel = batteryLevelText(pct)
+	battInfo, err := client.GetBatteryInfo()
+	if err == nil && battInfo != nil {
+		detail.BatteryPct = battInfo.Percent
+		detail.ReservePower = battInfo.Reserve
 	}
 
 	return detail, nil
@@ -233,19 +228,16 @@ func (f *tuiFlasher) ExecuteFlash(
 
 	// 记录刷写前设备信息（含电量）
 	if fwLog != nil {
-		rawBatt, battErr := checkBatteryRaw()
-		battPct, battLevel := 0, ""
-		if battErr == nil {
-			battPct = adcToPercent(rawBatt)
-			battLevel = batteryLevelText(battPct)
+		battInfo, battErr := checkBatteryRaw()
+		battPct := 0
+		if battErr == nil && battInfo != nil {
+			battPct = battInfo.Percent
 		}
 		fwLog.LogDeviceInfo("刷写前", logger.DeviceInfo{
-			Name:         device.DeviceName,
-			MAC:          device.MAC,
-			FwVersion:    device.FwVersion,
-			BatteryPct:   battPct,
-			BatteryRaw:   rawBatt,
-			BatteryLevel: battLevel,
+			Name:       device.DeviceName,
+			MAC:        device.MAC,
+			FwVersion:  device.FwVersion,
+			BatteryPct: battPct,
 		})
 
 		// 记录固件包信息
@@ -288,17 +280,13 @@ func (f *tuiFlasher) ExecuteFlash(
 
 			// 记录刷写后设备信息（含电量）
 			// 注意：手柄此时可能正在重启，HID 查询可能失败
-			rawBatt, battErr := checkBatteryRaw()
-			if battErr == nil {
-				battPct := adcToPercent(rawBatt)
-				battLevel := batteryLevelText(battPct)
+			battInfo, battErr := checkBatteryRaw()
+			if battErr == nil && battInfo != nil {
 				fwLog.LogDeviceInfo("刷写后", logger.DeviceInfo{
-					Name:         device.DeviceName,
-					MAC:          device.MAC,
-					FwVersion:    fw.Version,
-					BatteryPct:   battPct,
-					BatteryRaw:   rawBatt,
-					BatteryLevel: battLevel,
+					Name:       device.DeviceName,
+					MAC:        device.MAC,
+					FwVersion:  fw.Version,
+					BatteryPct: battInfo.Percent,
 				})
 			} else {
 				// HID 已断开（手柄重启中），仅记录基本信息

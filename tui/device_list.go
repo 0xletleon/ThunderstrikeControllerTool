@@ -90,7 +90,7 @@ func (m DeviceListModel) View() string {
 	b.WriteString("\n\n")
 
 	if m.scanning {
-		b.WriteString(DimStyle.Render("  正在扫描蓝牙 SPP 设备..."))
+		b.WriteString("  正在扫描蓝牙 SPP 设备...")
 		b.WriteString("\n\n")
 	}
 
@@ -102,33 +102,46 @@ func (m DeviceListModel) View() string {
 	if len(m.devices) == 0 && !m.scanning {
 		b.WriteString(WarningStyle.Render("  未发现蓝牙设备"))
 		b.WriteString("\n")
-		b.WriteString(DimStyle.Render("  请确保手柄已与电脑配对并连接"))
+		b.WriteString("  请确保手柄已与电脑配对并连接")
 		b.WriteString("\n\n")
-		b.WriteString(DimStyle.Render("  按 r 刷新 | 按 q 退出"))
+		b.WriteString("  按 r 刷新 | 按 q 退出")
 		return b.String()
 	}
 
 	b.WriteString(SectionHeaderStyle.Render(" ■ 设备列表"))
 	b.WriteString("\n\n")
-
+	
 	// 表头（使用显示宽度 padding，确保中文对齐）
-	b.WriteString(fmt.Sprintf("  %s  %s  %s  %s  %s\n",
+	b.WriteString(fmt.Sprintf("  %s  %s  %s  %s  %-10s  %s\n",
 		padRight("No.", 4),
 		padRight("设备名称", 24),
 		padRight("端口", 8),
 		padRight("MAC 地址", 18),
-		"固件版本"))
-	b.WriteString("  " + renderSeparator(72) + "\n")
+		"固件版本", "状态"))
+	b.WriteString("  " + renderSeparator(100) + "\n")
 
 	// 设备列表
 	for i, d := range m.devices {
 		name := truncateDisplay(d.DeviceName, 24)
-		line := fmt.Sprintf("  %s  %s  %s  %s  V%s",
+
+		// 设备状态：FwVersion 非空 = 在线，为空 = 休眠
+		var fwVer, status string
+		if d.FwVersion != "" {
+			fwVer = "V" + d.FwVersion
+			status = SuccessStyle.Render("在线")
+		} else {
+			fwVer = "V0.00"
+			status = WarningStyle.Render("休眠")
+		}
+
+		line := fmt.Sprintf(" %s  %s  %s  %s  %s  %s",
 			padRight(fmt.Sprintf("%d", d.Index), 4),
 			padRight(name, 24),
 			padRight(d.Port, 8),
 			padRight(d.MAC, 18),
-			d.FwVersion)
+			padRight(fwVer,14),
+			status,
+		)
 
 		if i == m.selectedIdx {
 			b.WriteString(SelectedItemStyle.Render(line))

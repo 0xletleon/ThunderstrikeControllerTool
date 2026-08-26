@@ -254,32 +254,133 @@ func (c *WindowsHidClient) SendCommand(cmd BtHidrawCommand, data []byte) ([]byte
 	return result, nil
 }
 
-// GetBatteryLevel queries the controller's battery level via HID.
-// The response format from the controller firmware varies:
-// some versions return a simple 0-100 percentage byte, others return
-// a raw ADC value. Returns the percentage if the value looks valid
-// (0-100), otherwise returns the raw value with a note.
-func (c *WindowsHidClient) GetBatteryLevel() (int, error) {
+// BatteryInfo holds the parsed battery state data from CMD_BATTERY_STATE.
+//
+// Response layout (data[] returned by SendCommand, header stripped):
+//
+//	data[0]    voltage LO     data[1]    voltage HI
+//	data[2]    batteryLevel   (BatteryLevel$Classic ordinal: 0=UNKNOWN,1=RESERVE,
+//	                           2=EMPTY,3=LOW,4=GOOD_40,5=GOOD_60,6=GOOD_80,7=FULL)
+//	data[3]    thermistor LO  data[4]    thermistor HI
+//	data[5]    esr LO         data[6]    esr HI
+//	data[11]   percent        (0-100, the real battery percentage)
+//	data[12]   reserve        (non-zero = reserve power engaged)
+//
+// All multi-byte fields are little-endian: value = (HI<<8) | LO.
+// Field offsets are relative to the full report (including 3-byte header
+// [0x03][cmd][txn]); after stripping the header the indices shift by -3.
+// Derived from Bt_Ops.smali onReport() packed-switch case for CMD_BATTERY_STATE.
+type BatteryInfo struct {
+	Percent     int  // Battery percentage 0-100 (data[11])
+	Level       int  // Battery level enum ordinal (data[2])
+	Voltage     int  // Raw voltage ADC value (data[1:2], little-endian)
+	Thermistor  int  // Thermistor reading (data[3:5], little-endian)
+	ESR         int  // Equivalent series resistance (data[5:7], little-endian)
+	Reserve     bool // Reserve power flag (data[12] != 0)
+}
+
+// BatteryClassic enumerates the standard battery level classifications
+// from BatteryLevel$Classic.smali. The integer value is the max percent
+// for that bracket (except UNKNOWN which uses -1 as sentinel).
+//
+//	UNKNOWN   = -1  (sentinel)
+//	RESERVE   =   0
+//	EMPTY     =   5
+//	LOW       =  20
+//	GOOD_40   =  40
+//	GOOD_60   =  60
+//	GOOD_80   =  80
+//	FULL      = 100
+type BatteryClassic int
+
+const (
+	BatteryUnknown  BatteryClassic = -1
+	BatteryReserve  BatteryClassic = 0
+	BatteryEmpty    BatteryClassic = 5
+	BatteryLow      BatteryClassic = 20
+	BatteryGood40   BatteryClassic = 40
+	BatteryGood60   BatteryClassic = 60
+	BatteryGood80   BatteryClassic = 80
+	BatteryFull     BatteryClassic = 100
+)
+
+// classicFromOrdinal converts a battery level ordinal byte to the
+// corresponding BatteryClassic bracket, matching BatteryLevel$Classic.fromInt.
+func classicFromOrdinal(ord int) BatteryClassic {
+	switch ord {
+	case 0:
+		return BatteryUnknown
+	case 1:
+		return BatteryReserve
+	case 2:
+		return BatteryEmpty
+	case 3:
+		return BatteryLow
+	case 4:
+		return BatteryGood40
+	case 5:
+		return BatteryGood60
+	case 6:
+		return BatteryGood80
+	case 7:
+		return BatteryFull
+	default:
+		return BatteryUnknown
+	}
+}
+
+// String returns the Chinese label for the battery classic bracket.
+func (b BatteryClassic) String() string {
+	switch b {
+	case BatteryUnknown:
+		return "未知"
+	case BatteryReserve:
+		return "储备"
+	case BatteryEmpty:
+		return "空"
+	case BatteryLow:
+		return "低"
+	case BatteryGood40:
+		return "良好(40%)"
+	case BatteryGood60:
+		return "良好(60%)"
+	case BatteryGood80:
+		return "良好(80%)"
+	case BatteryFull:
+		return "满电"
+	default:
+		return "未知"
+	}
+}
+
+// Classic returns the BatteryClassic bracket for this BatteryInfo.
+func (b BatteryInfo) Classic() BatteryClassic {
+	return classicFromOrdinal(b.Level)
+}
+
+// GetBatteryInfo queries the controller's full battery state via HID.
+// Returns all fields: percentage, voltage, thermistor, ESR, and reserve flag.
+func (c *WindowsHidClient) GetBatteryInfo() (*BatteryInfo, error) {
 	data, err := c.SendCommand(CmdBatteryState, nil)
 	if err != nil {
-		return 0, fmt.Errorf("battery query: %w", err)
-	}
-	if len(data) < 1 {
-		return 0, fmt.Errorf("battery: empty response")
+		return nil, fmt.Errorf("battery query: %w", err)
 	}
 
-	raw := int(data[0])
-
-	// If the value is in a reasonable 0-100 range, treat as percentage.
-	// Values above 100 are likely raw ADC readings (observed 216 / 0xD8
-	// on some firmware versions) and should not be shown as percentage.
-	if raw >= 0 && raw <= 100 {
-		return raw, nil
+	// Need at least 13 bytes of data for all fields.
+	if len(data) < 13 {
+		return nil, fmt.Errorf("battery: response too short (%d bytes, need 13)", len(data))
 	}
 
-	// Raw value outside 0-100 — likely an ADC reading. Return the raw
-	// value so the caller can display it appropriately.
-	return raw, fmt.Errorf("raw ADC value: %d (not a percentage)", raw)
+	info := &BatteryInfo{
+		Percent:    int(data[11]),
+		Level:      int(data[2]),
+		Voltage:    int(uint16(data[1])<<8 | uint16(data[0])),
+		Thermistor: int(uint16(data[4])<<8 | uint16(data[3])),
+		ESR:        int(uint16(data[6])<<8 | uint16(data[5])),
+		Reserve:    data[12] != 0,
+	}
+
+	return info, nil
 }
 
 // Close closes the HID device handle.

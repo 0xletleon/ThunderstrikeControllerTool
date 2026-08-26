@@ -393,7 +393,7 @@ func (m Model) View() string {
 		b.WriteString(RenderSubtitlePlaceholder())
 		b.WriteString("\n\n")
 		b.WriteString("\n\n")
-		b.WriteString(DimStyle.Render("  正在扫描蓝牙 SPP 设备..."))
+		b.WriteString("  正在扫描蓝牙 SPP 设备...")
 		content = b.String()
 
 	case StateDeviceList:

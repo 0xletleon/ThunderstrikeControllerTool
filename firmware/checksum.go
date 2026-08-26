@@ -26,7 +26,9 @@ import (
 var knownMd5 = map[string]string{
 	"thunderstrike_0x010e.blkz":         "4d3f6820f3d2ca8dd1bd9eb0cc08d5d3",
 	"thunderstrike_0x0112.blkz":         "eedf8c187bf1b14602a1a7dd07fa310b",
+	"thunderstrike_0x0121.blkz":         "8b7e0740d74e535bc229601ea67f1aa5",
 	"thunderstrike_0x0124.blkz":         "d4acee6b52034c7043a8bbefc3620384",
+	"thunderstrike_locale_0x0121.blkz":  "33684e7c51c3bb00046eefe7dcbe0232",
 	"thunderstrike_locale_0x0124.blkz":  "a26dd47beae27cc259ade27666e8e872",
 }
 

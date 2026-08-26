@@ -136,6 +136,8 @@ func (m FlashProgressModel) View() string {
 	b.WriteString("\n\n")
 
 	b.WriteString(SectionHeaderStyle.Render(" ■ 刷写固件"))
+	b.WriteString("\n")
+	b.WriteString(WarningStyle.Render("  请勿操作手柄,耐心等待！"))
 	b.WriteString("\n\n")
 
 	// 渲染步骤列表

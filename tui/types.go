@@ -16,19 +16,18 @@ type DeviceInfo struct {
 
 // DeviceDetail 表示通过 HID 查询到的设备详细信息。
 type DeviceDetail struct {
-	DeviceName  string
-	MAC         string
-	FwVersion   string // 如 "1.33"
+	DeviceName   string
+	MAC          string
+	FwVersion    string // 如 "1.33"
 	FwVersionHex string // 如 "0x010E"
-	CsrVersion  string // 蓝牙芯片版本
-	HotwordVer  string // 热词引擎版本
-	BoardType   int
-	BoardRev    int
-	Serial      string
-	MacHID      string // HID 查询到的 MAC
-	BatteryPct  int    // 电量百分比
-	BatteryRaw  int    // 原始 ADC 值
-	BatteryLevel string // 电量文字描述
+	CsrVersion   string // 蓝牙芯片版本
+	HotwordVer   string // 热词引擎版本
+	Serial       string
+	MacHID       string // HID 查询到的 MAC
+
+	// 电池信息（来自 CMD_BATTERY_STATE 响应）
+	BatteryPct   int  // 电量百分比 0-100
+	ReservePower bool // 是否进入储备电量
 }
 
 // FirmwareInfo 表示一个可选固件包的信息。

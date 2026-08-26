@@ -27,15 +27,13 @@ type FlashLogger struct {
 
 // DeviceInfo 记录刷写前后的设备信息。
 type DeviceInfo struct {
-	Name        string
-	MAC         string
-	FwVersion   string
-	CsrVersion  string
-	HwVersion   string
+	Name       string
+	MAC        string
+	FwVersion  string
+	CsrVersion string
+	HwVersion  string
 	Serial     string
-	BatteryPct   int    // 电量百分比
-	BatteryRaw   int    // 原始 ADC 值
-	BatteryLevel string // 电量描述
+	BatteryPct int // 电量百分比 0-100
 }
 
 // FirmwareInfo 记录固件包信息。
@@ -103,8 +101,8 @@ func (l *FlashLogger) LogDeviceInfo(phase string, info DeviceInfo) {
 	if info.Serial != "" {
 		l.writeln("  序列号:  %s", info.Serial)
 	}
-	if info.BatteryRaw > 0 {
-		l.writeln("  电量:    %d%%  ADC: %d (%s)", info.BatteryPct, info.BatteryRaw, info.BatteryLevel)
+	if info.BatteryPct > 0 {
+		l.writeln("  电量:    %d%%", info.BatteryPct)
 	}
 	l.writeln("")
 }
