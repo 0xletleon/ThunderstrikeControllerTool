@@ -1,11 +1,14 @@
-![Thunderstrike Controller](README/shieldtv-2017-controller-Thunderstrike.png)
+# Thunderstrike Controller Tool v0.3
 
-# Thunderstrike Controller Tool v0.2
-
-    NVIDIA SHIELD TV 2017 Controller Thunderstrike 蓝牙手柄固件管理工具
-    支持固件刷写 / 降级 / 升级 / 平刷 · 设备信息读取
+    NVIDIA SHIELD TV 2017 Thunderstrike Controller Flash Tool - 手柄固件工具
+    支持固件 降级 / 升级 / 平刷 · 设备信息读取
     仅支持 Windows · 仅通过蓝牙连接
 
+![刷机1](README/f1.png)
+![刷机2](README/f2.png)
+![刷机3](README/f3.png)
+![刷机4](README/f4.png)
+![bootloader](README/down.gif)
 ## 🛑警告！！！
 
     没有大量真实用户实测！
@@ -23,6 +26,7 @@
 - 🌐 **多语言固件** — 支持多语言版本的固件包
 - ✅ **安全校验** — 刷写前自动 MD5 校验，防止刷错固件
 - 📝 **完整日志** — 刷写过程自动记录设备信息、电量、进度、结果
+
 
 ## 快速开始
 
@@ -68,10 +72,10 @@ tsct
 
 | 版本 | 说明 |
 |------|------|
-| V1.14 | 旧版固件 |
+| V1.14 | 不能XY |
 | V1.18 | 推荐版本 |
 | V1.33 | 不能A+B |
-| V1.36 | 多语言版本 |
+| V1.36 | 不能A+B |
 
 > 本工具不检查版本号，可以自由升降级，只要固件签名匹配即可刷写。
 > 已实测验证：V1.33 → V1.18 降级成功。
@@ -144,24 +148,6 @@ ThunderstrikeControllerTool/
 └── logger/              # 刷写日志记录
 ```
 
-## 刷固件过程
-
-    我的情况是 卡 Google Logo
-
-![卡google logo](README/klogo.png)
-
-    手柄链接电脑蓝牙
-
-![链接电脑蓝牙](README/btc.png)
-
-    开始刷固件
-![开始刷固件1](README/f1.png)
-![开始刷固件1](README/f2.png)
-![开始刷固件1](README/f3.png)
-![开始刷固件1](README/f4.png)
-
-    可以按A+B进入BL
-
 ## 注意事项
 
 ⚠️ **刷写有风险，请注意：**
@@ -174,6 +160,8 @@ ThunderstrikeControllerTool/
 - 手柄需要先与电脑蓝牙配对
 - 如果设备列表中没有手柄，请检查蓝牙配对状态
 - 手柄休眠后可能需要按键唤醒才能重新发现
+
+![Thunderstrike Controller](README/shieldtv-2017-controller-Thunderstrike.png)
 
 ## 技术文档
 
