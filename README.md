@@ -56,16 +56,72 @@ tsct
 程序启动后会显示 TUI 界面，自动发现手柄并显示设备列表。
 使用方向键浏览、Enter 选择，即可查看设备信息和刷写固件。
 
-### TUI 操作指南
 
-| 按键 | 功能 |
-|------|------|
-| `↑` / `↓` 或 `k` / `j` | 浏览列表 |
-| `Enter` | 确认选择 |
-| `r` | 刷新设备列表 |
-| `f` | 进入刷写流程 |
-| `ESC` / `q` | 返回上一级 |
-| `Ctrl+C` | 退出程序 |
+## 注意事项
+
+⚠️ **刷写有风险，请注意：**
+- 电池电量要充足（> 20%）
+- 刷写过程中不要断开蓝牙
+- 手柄休眠后会断开连接，刷写前请操作手柄保持唤醒
+- 保留一份已知良好的固件包以备恢复
+
+⚠️ **蓝牙连接说明：**
+- 手柄需要先与电脑蓝牙配对
+- 如果设备列表中没有手柄，请检查蓝牙配对状态
+- 手柄休眠后可能需要按键唤醒才能重新发现
+
+
+## 跳过 Android TV 激活
+
+**系统要求**
+
+    开发者版自带ROOT的ATV版本！
+
+**解决 时间不同步**
+
+    usb 链接电脑
+    adb shell
+    su
+    看到 `darcy:/ $` 变为 `darcy:/ #` 即进入`root`状态
+    修改ntp服务器地址为 `ntp.aliyun.com`
+    settings put global ntp_server ntp.aliyun.com
+    验证 ntp 服务器值
+    settings get global captive_portal_http_url
+    测试 ntp 服务器
+    ping -c 2 connectivitycheck.platform.hicloud.com
+
+**修改 Android TV 验证服务器**
+
+    默认使用国外验证服务器,改为国内验证服务器
+
+    小米
+    settings put global captive_portal_http_url  http://connect.rom.miui.com/generate_204
+    settings put global captive_portal_https_url https://connect.rom.miui.com/generate_204
+    settings put global captive_portal_fallback_url  http://connect.rom.miui.com/generate_204
+
+    或华为
+    settings put global captive_portal_http_url  http://connectivitycheck.platform.hicloud.com/generate_204
+    settings put global captive_portal_https_url https://connectivitycheck.platform.hicloud.com/generate_204
+    settings put global captive_portal_fallback_url  http://connectivitycheck.platform.hicloud.com/generate_204
+    
+    Android 9 补充
+    settings put global captive_portal_server connectivitycheck.platform.hicloud.com
+
+**跳过向导**
+
+    adb shell
+    su
+    settings put secure user_setup_complete 1
+    settings put global device_provisioned 1
+
+**禁用向导**
+
+    adb shell
+    su
+    pm disable-user --user 0 com.google.android.tungsten.setupwraith
+    
+    // 最后重启系统
+    reboot
 
 
 ## 固件版本
@@ -92,7 +148,9 @@ blkz/
 └── Thunderstrike_locale_0x0124.blkz  # V1.36 多语言
 ```
 
-## 从源码编译
+## 技术栈
+
+### 从源码编译
 
 需要 Go 1.24+：
 
@@ -100,8 +158,6 @@ blkz/
 go mod tidy
 go build -o tsct.exe .
 ```
-
-## 技术栈
 
 ### TUI 框架
 
@@ -121,47 +177,6 @@ go build -o tsct.exe .
 | [go.bug.st/serial](https://github.com/bugst/go-serial) | 串口通信（SPP 蓝牙串口） |
 | [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys) | Windows 系统 API（HID、WMI） |
 
-### 项目结构
-
-```
-ThunderstrikeControllerTool/
-├── main.go              # 程序入口
-├── tui/                 # TUI 层（Bubble Tea）
-│   ├── model.go         # 主状态机（页面切换）
-│   ├── device_list.go   # 设备列表视图
-│   ├── device_info_view.go # 设备信息视图
-│   ├── firmware_list.go # 固件列表视图
-│   ├── flash_progress.go # 刷写进度视图
-│   ├── styles.go        # NVIDIA 品牌色样式
-│   ├── ascii_title.go   # ASCII Art 标题
-│   ├── text_align.go    # 中英文对齐工具
-│   ├── types.go         # 数据传递类型
-│   └── run.go           # TUI 启动入口
-├── cmd/                 # 业务逻辑层
-│   ├── tui_adapter.go   # TUI 接口适配器
-│   ├── helpers.go       # 辅助函数
-│   ├── flash_core.go    # 刷写核心逻辑
-│   └── bt_discovery_windows.go # 蓝牙设备扫描
-├── hid/                 # HID 通信
-├── spp/                 # SPP 串口协议
-├── firmware/            # 固件包解析
-└── logger/              # 刷写日志记录
-```
-
-## 注意事项
-
-⚠️ **刷写有风险，请注意：**
-- 电池电量要充足（> 20%）
-- 刷写过程中不要断开蓝牙
-- 手柄休眠后会断开连接，刷写前请操作手柄保持唤醒
-- 保留一份已知良好的固件包以备恢复
-
-⚠️ **蓝牙连接说明：**
-- 手柄需要先与电脑蓝牙配对
-- 如果设备列表中没有手柄，请检查蓝牙配对状态
-- 手柄休眠后可能需要按键唤醒才能重新发现
-
-![Thunderstrike Controller](README/shieldtv-2017-controller-Thunderstrike.png)
 
 ## 技术文档
 
@@ -171,3 +186,5 @@ ThunderstrikeControllerTool/
 
 本项目仅供学习和研究使用。
 NVIDIA、SHIELD、Thunderstrike 是 NVIDIA Corporation 的商标。
+
+![Thunderstrike Controller](README/shieldtv-2017-controller-Thunderstrike.png)
