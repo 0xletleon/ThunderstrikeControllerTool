@@ -25,22 +25,29 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"syscall"
 )
+
+// hideWindow 让子进程不闪出控制台窗口。
+// 扫描设备会调 powershell 与 reg，不设这个标志时每次刷新都会闪几个黑框。
+func hideWindow(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+}
 
 // Known Bluetooth device Vendor/Product IDs.
 const (
-	vidNvidia    = "00020955"
+	vidNvidia        = "00020955"
 	pidThunderstrike = "7214"
 )
 
 // btComPort represents a Bluetooth SPP outgoing COM port discovered via WMI.
 type btComPort struct {
-	comPort    string // e.g. "COM3"
-	mac        string // 12-digit hex MAC, e.g. "00044B9204F4"
-	macColon   string // formatted MAC, e.g. "00:04:4B:92:04:F4"
-	vid        string // vendor ID, e.g. "00020955" (NVIDIA)
-	pid        string // product ID, e.g. "7214" (Thunderstrike)
-	btName     string // Bluetooth friendly name, e.g. "NVIDIA Controller v01.04"
+	comPort  string // e.g. "COM3"
+	mac      string // 12-digit hex MAC, e.g. "00044B9204F4"
+	macColon string // formatted MAC, e.g. "00:04:4B:92:04:F4"
+	vid      string // vendor ID, e.g. "00020955" (NVIDIA)
+	pid      string // product ID, e.g. "7214" (Thunderstrike)
+	btName   string // Bluetooth friendly name, e.g. "NVIDIA Controller v01.04"
 }
 
 // deviceName returns the Bluetooth friendly name from Windows, or
@@ -69,6 +76,7 @@ func queryBtDeviceName(macColon string) string {
 	)
 
 	cmd := exec.Command("reg", "query", regPath, "/v", "Name")
+	hideWindow(cmd)
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -125,6 +133,7 @@ func discoverBtComPorts() ([]btComPort, error) {
 	const psScript = `Get-WmiObject Win32_SerialPort | ForEach-Object { "$($_.DeviceID)|$($_.PNPDeviceID)" }`
 
 	cmd := exec.Command("powershell", "-NoProfile", "-Command", psScript)
+	hideWindow(cmd)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("WMI query: %w", err)
@@ -169,12 +178,12 @@ func discoverBtComPorts() ([]btComPort, error) {
 		btName := queryBtDeviceName(macFmt)
 
 		ports = append(ports, btComPort{
-			comPort:    deviceID,
-			mac:        mac,
-			macColon:   macFmt,
-			vid:        vid,
-			pid:        pid,
-			btName:     btName,
+			comPort:  deviceID,
+			mac:      mac,
+			macColon: macFmt,
+			vid:      vid,
+			pid:      pid,
+			btName:   btName,
 		})
 	}
 
