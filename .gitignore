@@ -1,6 +1,7 @@
 Release/logs/
 Release/blkz/
 Release/tsct.exe
+Release/*.exe*
 avatar-gen/
 .opencode/
 Release/ext4imgtool/
