@@ -260,7 +260,12 @@ func (m *Model) selectedDevice() *core.DeviceInfo {
 // canFlash 报告当前是否允许开始刷写。
 func (m *Model) canFlash() bool {
 	fw := m.selectedFirmware()
-	if fw == nil || m.selectedDevice() == nil || m.flashing {
+	dev := m.selectedDevice()
+	if fw == nil || dev == nil || m.flashing {
+		return false
+	}
+	// 休眠设备查不到版本与电量，刷写风险高，先要求唤醒
+	if !dev.Online() {
 		return false
 	}
 	// 校验不通过的固件禁止刷写
@@ -356,11 +361,19 @@ func (m *Model) statusText() string {
 		return "正在扫描设备…"
 	case m.scanErr != "":
 		return "扫描失败：" + m.scanErr
-	case len(m.devices) == 0:
+	}
+
+	dev := m.selectedDevice()
+	if dev == nil {
 		return "未发现手柄，请确认已开机并配对"
 	}
-	return fmt.Sprintf("%s  ·  %s", orDash(m.selectedDevice().DeviceName),
-		orDash(m.selectedDevice().Port))
+	if m.flashing {
+		return "刷写中，请勿操作手柄"
+	}
+	if !dev.Online() {
+		return "手柄休眠中 · 按键唤醒后点「重新读取」"
+	}
+	return fmt.Sprintf("%s  ·  %s", orDash(dev.DeviceName), orDash(dev.Port))
 }
 
 // --- 手柄输入指示 ---

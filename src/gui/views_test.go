@@ -215,6 +215,14 @@ func TestSnapshots(t *testing.T) {
 			m.devices = nil
 			m.detail = nil
 		}},
+		{"09_sleeping", func(m *Model) {
+			// 休眠：扫得到端口但读不到版本/电量
+			m.devices[0].FwVersion = ""
+			m.detail = &core.DeviceDetail{
+				DeviceName: "NVIDIA Controller",
+				MAC:        "00:04:4B:92:04:F4",
+			}
+		}},
 	}
 
 	for _, tc := range cases {

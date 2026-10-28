@@ -47,7 +47,7 @@ func (m *Model) deviceBlock(c *ui.Context) {
 					ui.Row(c).FillWidth().Gap(28).AlignItems(ui.End).Children(func() {
 						ui.Column(c).Gap(2).Children(func() {
 							ui.Text(c, "固件版本").FontSize(10).TextColor(colorTextFaint)
-							ui.Text(c, "V"+orDash(d.FwVersion)).FontSize(20).Bold().
+							ui.Text(c, versionText(d.FwVersion)).FontSize(20).Bold().
 								TextColor(colorText)
 						})
 
@@ -76,15 +76,40 @@ func (m *Model) deviceBlock(c *ui.Context) {
 					})
 				})
 
-				// 右侧：端口与 MAC
+				// 右侧：端口、MAC；读不到信息时给一个重新读取入口
 				ui.Column(c).Gap(4).AlignItems(ui.End).Children(func() {
 					ui.Text(c, orDash(dev.Port)).FontSize(12).TextColor(colorText)
 					ui.Text(c, orDash(d.MacHID)).FontSize(10).TextColor(colorTextFaint)
+
+					switch {
+					case m.detailLoading:
+						ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+							ui.Spinner(c)
+							ui.Text(c, "读取中").FontSize(10).TextColor(colorTextFaint)
+						})
+					case m.needsRefresh():
+						if ui.Button(c, "重新读取").Clicked() {
+							m.refreshDetail()
+						}
+					}
 				})
 			})
 		})
 
 	hairline(c)
+}
+
+// needsRefresh 报告设备信息是否需要重新读取。
+// 休眠设备（查不到固件版本）或详情读取失败时为真。
+func (m *Model) needsRefresh() bool {
+	dev := m.selectedDevice()
+	if dev == nil || m.detailLoading {
+		return false
+	}
+	if !dev.Online() {
+		return true
+	}
+	return m.detail == nil || m.detail.FwVersion == ""
 }
 
 // batteryFallback 在电量读不到时给出原因提示。

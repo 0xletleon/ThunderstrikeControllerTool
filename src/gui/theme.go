@@ -104,6 +104,14 @@ func chip(c *ui.Context, text string, fg ui.Color) {
 		Radius(3)
 }
 
+// versionText 把版本号格式化为展示文本，空值用占位符。
+func versionText(v string) string {
+	if v == "" {
+		return "—"
+	}
+	return "V" + v
+}
+
 // orDash 在字符串为空时返回占位符。
 func orDash(s string) string {
 	if s == "" {
