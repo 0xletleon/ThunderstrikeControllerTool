@@ -235,13 +235,15 @@ func TestSnapshots(t *testing.T) {
 }
 
 // TestClickSelectsFirmware 验证点击固件行会切换选中项。
+// 用文本定位而不是坐标：布局一调整坐标就失效。
 func TestClickSelectsFirmware(t *testing.T) {
 	m := newTestModel()
 	tester := ui.NewTester(m.View, 708, 562)
 	tester.Frame()
 
-	// 固件列表第三行（行高 44，首行从 y≈173 开始）
-	tester.ClickAt(300, 283)
+	if err := tester.Click("Thunderstrike_locale_0x0121.blkz"); err != nil {
+		t.Fatalf("点击固件行失败: %v", err)
+	}
 	tester.Frame()
 
 	if m.fwIdx != 2 {

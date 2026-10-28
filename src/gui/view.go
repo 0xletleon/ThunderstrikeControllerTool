@@ -9,7 +9,7 @@ import (
 )
 
 // deviceBlockH 设备信息区固定高度。
-const deviceBlockH = 92
+const deviceBlockH = 106
 
 // deviceBlock 渲染设备区：名称、固件版本、电量、端口。
 func (m *Model) deviceBlock(c *ui.Context) {
@@ -30,86 +30,70 @@ func (m *Model) deviceBlock(c *ui.Context) {
 				d = &core.DeviceDetail{DeviceName: dev.DeviceName, MAC: dev.MAC}
 			}
 
-			ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Start).Children(func() {
-				ui.Column(c).Grow(1).Gap(6).Children(func() {
-					// 名称 + 状态
-					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, dev.DeviceName).FontSize(15).Bold().
+			// 纵向排列：名称 / 读数 / 端口与刷新。
+			// 不用左右分栏 —— 真机上 Grow 会把右栏压成 0 宽。
+			ui.Column(c).FillWidth().Gap(6).Children(func() {
+				// 名称 + 状态
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, dev.DeviceName).FontSize(15).Bold().
+						TextColor(colorText)
+					if dev.Online() {
+						chip(c, "在线", colorBrandDark)
+					} else {
+						chip(c, "休眠", colorTextMuted)
+					}
+				})
+
+				// 两个读数：固件版本、电量
+				ui.Row(c).Gap(36).AlignItems(ui.End).Children(func() {
+					ui.Column(c).Gap(2).Children(func() {
+						ui.Text(c, "固件版本").FontSize(10).TextColor(colorTextFaint)
+						ui.Text(c, versionText(d.FwVersion)).FontSize(20).Bold().
 							TextColor(colorText)
-						if dev.Online() {
-							chip(c, "在线", colorBrandDark)
-						} else {
-							chip(c, "休眠", colorTextMuted)
-						}
 					})
 
-					// 两个读数：固件版本、电量
-					ui.Row(c).FillWidth().Gap(28).AlignItems(ui.End).Children(func() {
-						ui.Column(c).Gap(2).Children(func() {
-							ui.Text(c, "固件版本").FontSize(10).TextColor(colorTextFaint)
-							ui.Text(c, versionText(d.FwVersion)).FontSize(20).Bold().
-								TextColor(colorText)
-						})
-
-						ui.Column(c).Grow(1).Gap(2).Children(func() {
-							ui.Text(c, "电量").FontSize(10).TextColor(colorTextFaint)
-							if d.BatteryPct > 0 {
-								ui.Row(c).FillWidth().Gap(10).AlignItems(ui.End).
+					ui.Column(c).Gap(2).Children(func() {
+						ui.Text(c, "电量").FontSize(10).TextColor(colorTextFaint)
+						if d.BatteryPct > 0 {
+							ui.Row(c).Gap(10).AlignItems(ui.End).Children(func() {
+								ui.Text(c, fmt.Sprintf("%d", d.BatteryPct)).
+									FontSize(20).Bold().
+									TextColor(batteryColor(d.BatteryPct))
+								ui.Text(c, "%").FontSize(10).
+									TextColor(colorTextMuted).Padding(0, 0, 3, 0)
+								// 电量条限宽：否则会一路拉到窗口右边缘
+								ui.Box(c).Width(150).Padding(0, 0, 0, 6).
 									Children(func() {
-										ui.Text(c, fmt.Sprintf("%d", d.BatteryPct)).
-											FontSize(20).Bold().
-											TextColor(batteryColor(d.BatteryPct))
-										ui.Text(c, "%").FontSize(10).
-											TextColor(colorTextMuted).Padding(0, 0, 3, 0)
-										// 电量条限宽：否则会一路拉到窗口右边缘，与读数脱节
-										ui.Box(c).Width(150).Padding(0, 0, 0, 6).
-											Children(func() {
-												bar(c, float32(d.BatteryPct)/100,
-													batteryColor(d.BatteryPct))
-											})
+										bar(c, float32(d.BatteryPct)/100,
+											batteryColor(d.BatteryPct))
 									})
-							} else {
-								ui.Text(c, m.batteryFallback()).FontSize(14).
-									TextColor(colorTextFaint)
-							}
-						})
+							})
+						} else {
+							ui.Text(c, m.batteryFallback()).FontSize(14).
+								TextColor(colorTextFaint)
+						}
 					})
 				})
 
-				// 右侧：端口、MAC；读不到信息时给一个重新读取入口
-				ui.Column(c).Gap(4).AlignItems(ui.End).Children(func() {
-					ui.Text(c, orDash(dev.Port)).FontSize(12).TextColor(colorText)
-					ui.Text(c, orDash(d.MacHID)).FontSize(10).TextColor(colorTextFaint)
+				// 端口 · MAC，右侧始终有刷新入口
+				ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, orDash(dev.Port)+"  ·  "+orDash(d.MacHID)).
+						FontSize(10).TextColor(colorTextFaint)
+					ui.Spacer(c)
 
-					switch {
-					case m.detailLoading:
-						ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-							ui.Spinner(c)
-							ui.Text(c, "读取中").FontSize(10).TextColor(colorTextFaint)
-						})
-					case m.needsRefresh():
-						if ui.Button(c, "重新读取").Clicked() {
-							m.refreshDetail()
-						}
+					if m.scanning || m.detailLoading || m.fwLoading {
+						ui.Button(c, "刷新中…").Disabled(true)
+						return
+					}
+					// 唯一的刷新入口：设备与固件一起刷
+					if ui.Button(c, "刷新").Clicked() {
+						m.refreshAll()
 					}
 				})
 			})
 		})
 
 	hairline(c)
-}
-
-// needsRefresh 报告设备信息是否需要重新读取。
-// 休眠设备（查不到固件版本）或详情读取失败时为真。
-func (m *Model) needsRefresh() bool {
-	dev := m.selectedDevice()
-	if dev == nil || m.detailLoading {
-		return false
-	}
-	if !dev.Online() {
-		return true
-	}
-	return m.detail == nil || m.detail.FwVersion == ""
 }
 
 // batteryFallback 在电量读不到时给出原因提示。
@@ -144,7 +128,7 @@ func (m *Model) deviceEmpty(c *ui.Context) {
 				FontSize(11).TextColor(colorTextMuted)
 		})
 
-		if ui.Button(c, "重新扫描设备").Clicked() {
+		if ui.Button(c, "刷新").Clicked() {
 			m.refreshAll()
 		}
 	})
@@ -170,10 +154,6 @@ func (m *Model) firmwareBlock(c *ui.Context) {
 			if n := len(m.firmwares); n > 0 {
 				ui.Text(c, fmt.Sprintf("%d 个", n)).FontSize(10).
 					TextColor(colorTextFaint)
-			}
-			ui.Spacer(c)
-			if ui.Button(c, "重新扫描").Clicked() {
-				m.loadFirmwares()
 			}
 		})
 

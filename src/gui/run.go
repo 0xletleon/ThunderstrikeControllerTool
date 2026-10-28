@@ -371,7 +371,7 @@ func (m *Model) statusText() string {
 		return "刷写中，请勿操作手柄"
 	}
 	if !dev.Online() {
-		return "手柄休眠中 · 按键唤醒后点「重新读取」"
+		return "手柄休眠中 · 按键唤醒后点右上角「刷新」"
 	}
 	return fmt.Sprintf("%s  ·  %s", orDash(dev.DeviceName), orDash(dev.Port))
 }
