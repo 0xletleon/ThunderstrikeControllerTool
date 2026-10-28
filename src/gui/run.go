@@ -53,9 +53,9 @@ func Run(svc core.Services) error {
 		m.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:           "Thunderstrike Controller Tool",
 			Width:           760,
-			Height:          772,
+			Height:          528,
 			MinWidth:        700,
-			MinHeight:       520,
+			MinHeight:       500,
 			BackgroundColor: "#FFFFFF",
 			// 自绘标题栏：系统标题栏是浅灰的，与白底界面割裂
 			TitleBarStyle:  mygo.TitleBarHidden,

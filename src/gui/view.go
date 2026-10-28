@@ -9,7 +9,7 @@ import (
 )
 
 // deviceBlockH 设备信息区固定高度。
-const deviceBlockH = 124
+const deviceBlockH = deviceHeight
 
 // deviceBlock 渲染设备区：名称、固件版本、电量、端口。
 func (m *Model) deviceBlock(c *ui.Context) {
@@ -141,9 +141,9 @@ func (m *Model) blockHint(c *ui.Context, text string, busy bool) {
 	})
 }
 
-// firmwareBlock 渲染固件列表区。
+// firmwareBlock 渲染固件列表区：固定高度，超出部分在区内滚动。
 func (m *Model) firmwareBlock(c *ui.Context) {
-	ui.Row(c).FillWidth().Padding(8, pagePadding).Gap(8).
+	ui.Row(c).FillWidth().Height(listLabelH).Padding(0, pagePadding).Gap(8).
 		AlignItems(ui.Center).
 		Children(func() {
 			ui.Text(c, "固件").FontSize(10).TextColor(colorTextFaint).
@@ -154,18 +154,19 @@ func (m *Model) firmwareBlock(c *ui.Context) {
 			}
 		})
 
-	if m.fwLoading || len(m.firmwares) == 0 {
-		ui.Box(c).FillWidth().Padding(24, pagePadding).Children(func() {
-			m.blockHint(c, m.firmwaresEmptyText(), m.fwLoading)
-		})
-		return
-	}
-
-	// 内容自然流：不用固定高度/裁切，避免 mygo 的 flex 尺寸计算偏差
-	ui.Box(c).FillWidth().Children(func() {
-		for i := range m.firmwares {
-			m.firmwareRow(c, i)
+	ui.Box(c).FillWidth().Height(firmwareListH).Children(func() {
+		if m.fwLoading || len(m.firmwares) == 0 {
+			ui.Box(c).FillWidth().Padding(24, pagePadding).Children(func() {
+				m.blockHint(c, m.firmwaresEmptyText(), m.fwLoading)
+			})
+			return
 		}
+
+		ui.Scroll(c).Fill().Children(func() {
+			for i := range m.firmwares {
+				m.firmwareRow(c, i)
+			}
+		})
 	})
 }
 

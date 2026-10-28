@@ -6,13 +6,23 @@ package gui
 
 import "github.com/egoist/mygo/ui"
 
-// 版式常量。
+// 版式常量。全部固定高度：内容总高恒定，底部区域位置不跳。
 const (
-	headerHeight = 44
-	footerHeight = 34
-	actionHeight = 88
+	headerHeight = 40
+	footerHeight = 30
+	actionHeight = 80
+	deviceHeight = 136
+	listLabelH   = 25
+	listRowH     = 36
+	listRows     = 6 // 固件列表固定显示 6 行，超出在区内滚动
 	pagePadding  = 18
 )
+
+// firmwareListH 是固件列表区的固定高度。
+const firmwareListH = listRowH * listRows
+
+// repoURL 是项目仓库地址，页头版本号点击后打开。
+const repoURL = "https://github.com/0xletleon/ThunderstrikeControllerTool"
 
 // 色板：白底 + NVIDIA 绿色家族。
 // 官方主绿 #76B900（Pantone 376 C），其余深浅绿都是它的衍生。
