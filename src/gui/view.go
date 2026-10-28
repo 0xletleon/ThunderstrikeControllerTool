@@ -154,7 +154,7 @@ func (m *Model) firmwareBlock(c *ui.Context) {
 			}
 		})
 
-	ui.Box(c).FillWidth().Height(firmwareListH).Children(func() {
+	ui.Box(c).FillWidth().Height(m.listHeight(c)).Children(func() {
 		if m.fwLoading || len(m.firmwares) == 0 {
 			ui.Box(c).FillWidth().Padding(24, pagePadding).Children(func() {
 				m.blockHint(c, m.firmwaresEmptyText(), m.fwLoading)
@@ -168,6 +168,17 @@ func (m *Model) firmwareBlock(c *ui.Context) {
 			}
 		})
 	})
+}
+
+// listHeight 按当前窗口高度动态计算固件列表高度。
+// 窗口拉高时列表跟着变高；其余版块都是固定高度，窗口拉高只会让列表变大。
+func (m *Model) listHeight(c *ui.Context) float32 {
+	_, sh := c.Size()
+	h := sh - headerHeight - deviceHeight - listLabelH - actionHeight - footerHeight - 2
+	if h < listRowH {
+		h = listRowH
+	}
+	return h
 }
 
 // firmwaresEmptyText 返回固件列表为空时的提示。

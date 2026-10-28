@@ -18,9 +18,6 @@ const (
 	pagePadding  = 18
 )
 
-// firmwareListH 是固件列表区的固定高度。
-const firmwareListH = listRowH * listRows
-
 // repoURL 是项目仓库地址，页头版本号点击后打开。
 const repoURL = "https://github.com/0xletleon/ThunderstrikeControllerTool"
 
