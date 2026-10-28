@@ -1,15 +1,16 @@
 // Package hid — 后台输入监听器。
 //
-// 打开 Thunderstrike HID 设备的只读共享句柄，
-// 持续读取 HID 输入报告。当检测到手柄按键/摇杆活动时，
-// 通过 channel 通知调用方。
+// 手柄会注册多个 HID 集合（蓝牙 HID 服务路径与物理设备路径各一个），
+// 按键上报可能落在其中任意一个，因此这里监听全部匹配的集合。
 //
-// 使用共享模式打开，不干扰其他进程或刷写流程对设备的访问。
-// 当设备断开（如刷写后重启）时，自动尝试重新连接。
+// 每个集合用只读共享句柄阻塞读取，不干扰其他进程或刷写流程对设备的访问。
+// 设备未连接（休眠、未配对、刷写后重启）时每 2 秒重试，
+// 设备出现后自动开始读取，无需重新启动监听。
 package hid
 
 import (
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -17,37 +18,30 @@ import (
 
 // InputMonitor 后台监听 HID 输入报告。
 type InputMonitor struct {
-	mu     sync.Mutex
-	closed bool
-	cancel chan struct{}
+	mu      sync.Mutex
+	closed  bool
+	cancel  chan struct{}
+	handles map[uintptr]struct{} // 当前打开的句柄，Close 时用于中断阻塞读
 }
 
-// NewInputMonitor 打开 Thunderstrike HID 设备的只读共享句柄。
-// 如果设备未连接，返回 nil, nil（不报错，只是没有设备可监听）。
-func NewInputMonitor() (*InputMonitor, error) {
-	// 只检查设备是否存在，不持有句柄
-	devicePath, err := FindThunderstrikeHidDevice()
-	if err != nil {
-		return nil, err
-	}
-	if devicePath == "" {
-		return nil, nil
-	}
-
+// NewInputMonitor 创建 HID 输入监听器。
+//
+// 这里不检查设备当前是否存在：手柄休眠或尚未连接时，监听循环会持续重试，
+// 设备上线后自动接入。调用方只需 Start 一次。
+func NewInputMonitor() *InputMonitor {
 	return &InputMonitor{
-		cancel: make(chan struct{}),
-	}, nil
+		cancel:  make(chan struct{}),
+		handles: make(map[uintptr]struct{}),
+	}
 }
 
-// openDevice 尝试打开 HID 设备句柄。
-// 成功返回句柄，失败返回 0。
-func openDevice() uintptr {
-	devicePath, err := FindThunderstrikeHidDevice()
-	if err != nil || devicePath == "" {
+// openPath 打开指定 HID 接口路径的只读共享句柄。失败返回 0。
+func openPath(path string) uintptr {
+	pathUTF16, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
 		return 0
 	}
 
-	pathUTF16, _ := syscall.UTF16PtrFromString(devicePath)
 	handle, _, _ := procCreateFile.Call(
 		uintptr(unsafe.Pointer(pathUTF16)),
 		genericRead,
@@ -61,29 +55,25 @@ func openDevice() uintptr {
 	return handle
 }
 
-// Start 在后台 goroutine 中持续读取 HID 输入报告。
-// 检测到非零输入时，通过 onInput 回调通知。
-func (m *InputMonitor) Start(onInput func()) {
-	go m.readLoop(onInput)
+// Start 在后台持续读取所有匹配集合的 HID 输入报告。
+// 检测到非零输入时调用 onInput；集合句柄成功打开（设备在线）时调用 onReady（可为 nil）。
+func (m *InputMonitor) Start(onInput func(), onReady func()) {
+	go m.supervise(onInput, onReady)
 }
 
-// readLoop 持续读取 HID 输入报告的循环。
-// 当设备断开时，自动重试连接。
-func (m *InputMonitor) readLoop(onInput func()) {
-	lastNonZeroTime := time.Time{}
+// supervise 枚举全部 HID 集合，为每个集合启动一个读循环。
+// 全部断开后重新枚举，等待设备回来（例如刷写后重启）。
+func (m *InputMonitor) supervise(onInput func(), onReady func()) {
+	// 多个集合共享同一个通知节流，避免一次按键被重复报告
+	var lastNotify atomic.Int64
 
 	for {
-		m.mu.Lock()
-		if m.closed {
-			m.mu.Unlock()
+		if m.isClosed() {
 			return
 		}
-		m.mu.Unlock()
 
-		// 打开设备句柄
-		handle := openDevice()
-		if handle == 0 {
-			// 设备未连接，等待后重试
+		paths, err := findThunderstrikeHidPaths()
+		if err != nil || len(paths) == 0 {
 			select {
 			case <-m.cancel:
 				return
@@ -92,79 +82,21 @@ func (m *InputMonitor) readLoop(onInput func()) {
 			}
 		}
 
-		// 在此句柄上循环读取
-		readBuf := make([]byte, 256)
-		disconnected := false
+		var wg sync.WaitGroup
+		for _, path := range paths {
+			wg.Add(1)
+			go func(p string) {
+				defer wg.Done()
+				m.readHandle(p, onInput, onReady, &lastNotify)
+			}(path)
+		}
+		wg.Wait()
 
-		for !disconnected {
-			m.mu.Lock()
-			if m.closed {
-				m.mu.Unlock()
-				procCloseHandle.Call(handle)
-				return
-			}
-			m.mu.Unlock()
-
-			result := make(chan struct {
-				data []byte
-				n    uint32
-			}, 1)
-
-			go func() {
-				var bytesRead uint32
-				procReadFile.Call(
-					handle,
-					uintptr(unsafe.Pointer(&readBuf[0])),
-					uintptr(len(readBuf)),
-					uintptr(unsafe.Pointer(&bytesRead)),
-					0,
-				)
-				result <- struct {
-					data []byte
-					n    uint32
-				}{readBuf, bytesRead}
-			}()
-
-			select {
-			case r := <-result:
-				if r.n > 0 {
-					// 检查是否有非零数据
-					hasData := false
-					for i := 0; i < int(r.n); i++ {
-						if r.data[i] != 0 {
-							hasData = true
-							break
-						}
-					}
-					if hasData {
-						now := time.Now()
-						if now.Sub(lastNonZeroTime) >= 100*time.Millisecond {
-							lastNonZeroTime = now
-							onInput()
-						}
-					}
-				} else {
-					// ReadFile 返回 0 字节，设备可能已断开
-					disconnected = true
-				}
-
-			case <-m.cancel:
-				procCancelIoEx.Call(handle, 0)
-				procCloseHandle.Call(handle)
-				return
-
-			case <-time.After(500 * time.Millisecond):
-				// 超时取消当前读取，继续下一轮
-				procCancelIoEx.Call(handle, 0)
-				// 等待 goroutine 退出
-				<-result
-			}
+		if m.isClosed() {
+			return
 		}
 
-		// 设备断开，关闭旧句柄，外层循环会重新打开
-		procCloseHandle.Call(handle)
-
-		// 等待一小段时间再重试（设备重启可能需要几秒）
+		// 设备可能正在重启，稍等后再重新枚举
 		select {
 		case <-m.cancel:
 			return
@@ -173,15 +105,113 @@ func (m *InputMonitor) readLoop(onInput func()) {
 	}
 }
 
-// Close 停止监听。
-func (m *InputMonitor) Close() error {
+// readHandle 在一个集合句柄上阻塞读取，直到设备断开或监听被关闭。
+//
+// 手柄静止时没有输入报告，ReadFile 会一直阻塞——这是正常状态，
+// 不做超时取消（取消会让句柄失效，导致按键被漏掉）。
+// 只有在 Close 时才用 CancelIoEx 打断阻塞读。
+func (m *InputMonitor) readHandle(path string, onInput func(), onReady func(), lastNotify *atomic.Int64) {
+	handle := openPath(path)
+	if handle == 0 {
+		return
+	}
+	if !m.addHandle(handle) {
+		procCloseHandle.Call(handle)
+		return
+	}
+	defer func() {
+		m.removeHandle(handle)
+		procCloseHandle.Call(handle)
+	}()
+
+	if onReady != nil {
+		onReady()
+	}
+
+	buf := make([]byte, 512)
+	for {
+		var bytesRead uint32
+		ret, _, _ := procReadFile.Call(
+			handle,
+			uintptr(unsafe.Pointer(&buf[0])),
+			uintptr(len(buf)),
+			uintptr(unsafe.Pointer(&bytesRead)),
+			0,
+		)
+		// ReadFile 失败或读到 0 字节：设备断开（或 Close 打断了读取）
+		if ret == 0 || bytesRead == 0 {
+			return
+		}
+
+		if !hasNonZero(buf[:bytesRead]) {
+			continue
+		}
+
+		// 摇杆/扳机连续上报时限制通知频率，避免刷屏
+		now := time.Now().UnixNano()
+		if now-lastNotify.Load() < int64(100*time.Millisecond) {
+			continue
+		}
+		lastNotify.Store(now)
+		onInput()
+	}
+}
+
+// addHandle 登记句柄。若监听已被关闭，返回 false。
+func (m *InputMonitor) addHandle(h uintptr) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	if m.closed {
+		return false
+	}
+	m.handles[h] = struct{}{}
+	return true
+}
+
+// removeHandle 注销句柄。
+func (m *InputMonitor) removeHandle(h uintptr) {
+	m.mu.Lock()
+	delete(m.handles, h)
+	m.mu.Unlock()
+}
+
+// isClosed 报告监听是否已关闭。
+func (m *InputMonitor) isClosed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.closed
+}
+
+// hasNonZero 判断报告里是否有非零字节。
+// 手柄空闲时会周期性上报全零报告，这些不算输入。
+func hasNonZero(b []byte) bool {
+	for _, v := range b {
+		if v != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// Close 停止监听，并打断所有阻塞中的 ReadFile。
+func (m *InputMonitor) Close() error {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
 		return nil
 	}
 	m.closed = true
+	open := make([]uintptr, 0, len(m.handles))
+	for h := range m.handles {
+		open = append(open, h)
+	}
+	m.mu.Unlock()
+
 	close(m.cancel)
+
+	// 打断 readHandle 里阻塞的 ReadFile，让它尽快退出
+	for _, h := range open {
+		procCancelIoEx.Call(h, 0)
+	}
 	return nil
 }

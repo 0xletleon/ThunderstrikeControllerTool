@@ -47,14 +47,10 @@
 
 ### 4. 运行
 
-双击 `tsct.exe` 或在命令行中运行：
+双击 `tsct.exe` 启动，程序会自动发现手柄并显示设备列表。
+点击设备行查看详细信息，再点「刷写固件」选择固件包即可刷写。
 
-```
-tsct
-```
-
-程序启动后会显示 TUI 界面，自动发现手柄并显示设备列表。
-使用方向键浏览、Enter 选择，即可查看设备信息和刷写固件。
+键盘也能操作：`↑` `↓` 选择、`Enter` 打开、`Esc` 返回、`F5` 刷新、`Ctrl+Q` 退出。
 
 
 ## 注意事项
@@ -152,23 +148,20 @@ blkz/
 
 ### 从源码编译
 
-需要 Go 1.24+：
+需要 Go 1.27.3+（界面库 MyGo 的最低要求，低于此版本会自动下载工具链）：
 
 ```powershell
 go mod tidy
 go build -o tsct.exe .
 ```
 
-### TUI 框架
+### 界面框架
 
-本项目使用 [Charm](https://github.com/charmbracelet) 全家桶构建终端用户界面：
+界面使用 [MyGo](https://github.com/egoist/mygo) 原生自绘 UI（纯 Go、无需 cgo）：
 
 | 库 | 说明 |
 |---|---|
-| [Bubble Tea](https://github.com/charmbracelet/bubbletea) | Elm 架构的 TUI 框架，管理状态机和事件循环 |
-| [Bubbles](https://github.com/charmbracelet/bubbles) | TUI 组件库（进度条、列表等） |
-| [Lipgloss](https://github.com/charmbracelet/lipgloss) | 终端样式库（颜色、边框、对齐） |
-| [go-figure](https://github.com/common-nighthawk/go-figure) | ASCII Art 标题渲染 |
+| [MyGo](https://github.com/egoist/mygo) | 原生窗口与自绘 UI 工具包（版本锁定 v0.7.1） |
 
 ### 核心依赖
 

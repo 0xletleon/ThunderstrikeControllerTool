@@ -67,17 +67,34 @@ type WindowsHidClient struct {
 }
 
 // FindThunderstrikeHidDevice searches for a Thunderstrike HID device.
+// 返回第一个匹配的接口路径，用于收发 HID 命令。
 func FindThunderstrikeHidDevice() (string, error) {
+	paths, err := findThunderstrikeHidPaths()
+	if err != nil {
+		return "", err
+	}
+	if len(paths) == 0 {
+		return "", nil
+	}
+	return paths[0], nil
+}
+
+// findThunderstrikeHidPaths 返回所有 VID/PID 匹配 Thunderstrike 的 HID 接口路径。
+//
+// 手柄会注册多个 HID 集合（例如蓝牙 HID 服务路径与物理设备路径各一个），
+// 命令收发与手柄按键上报可能落在不同集合上，因此输入监听需要全部监听。
+func findThunderstrikeHidPaths() ([]string, error) {
 	hInfo, _, _ := procSetupDiGetClassDevsW.Call(
 		uintptr(unsafe.Pointer(&hidGuid)),
 		0, 0,
 		digcfDeviceInterface|digcfPresent,
 	)
 	if hInfo == 0 || hInfo == uintptr(^uintptr(0)) {
-		return "", fmt.Errorf("SetupDiGetClassDevs failed")
+		return nil, fmt.Errorf("SetupDiGetClassDevs failed")
 	}
 	defer procSetupDiDestroyDeviceInfoList.Call(hInfo)
 
+	var paths []string
 	index := uint32(0)
 	for {
 		var ifaceData spDeviceInterfaceData
@@ -145,11 +162,11 @@ func FindThunderstrikeHidDevice() (string, error) {
 		procCloseHandle.Call(handle)
 
 		if attrs.VendorID == vidNvidia && attrs.ProductID == pidThunderstrike {
-			return devicePath, nil
+			paths = append(paths, devicePath)
 		}
 	}
 
-	return "", nil
+	return paths, nil
 }
 
 // OpenWindowsHidClient opens the Thunderstrike HID device for read/write.

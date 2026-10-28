@@ -1,8 +1,8 @@
-// Package cmd — TUI 适配器实现。
+// Package cmd — 界面适配器实现。
 //
-// 实现 tui 包定义的 DeviceScanner、FirmwareScanner、Flasher 接口，
+// 实现 core 包定义的 DeviceScanner、FirmwareScanner、Flasher 接口，
 // 将现有业务逻辑（WMI 设备扫描、HID 查询、固件解析、SPP 刷写）
-// 适配为 TUI 可调用的接口。
+// 适配为界面层可调用的接口。
 package cmd
 
 import (
@@ -12,25 +12,25 @@ import (
 	"sort"
 	"time"
 
+	"thunderstrike-controller-tool/core"
 	"thunderstrike-controller-tool/firmware"
 	"thunderstrike-controller-tool/hid"
 	"thunderstrike-controller-tool/logger"
 	"thunderstrike-controller-tool/spp"
-	"thunderstrike-controller-tool/tui"
 )
 
 // --- DeviceScanner 实现 ---
 
-// tuiDeviceScanner 实现 tui.DeviceScanner 接口。
-type tuiDeviceScanner struct{}
+// deviceScanner 实现 core.DeviceScanner 接口。
+type deviceScanner struct{}
 
-// NewTuiDeviceScanner 创建 TUI 设备扫描器。
-func NewTuiDeviceScanner() tui.DeviceScanner {
-	return &tuiDeviceScanner{}
+// NewDeviceScanner 创建设备扫描器。
+func NewDeviceScanner() core.DeviceScanner {
+	return &deviceScanner{}
 }
 
-// ScanDevices 扫描蓝牙 SPP 设备，转换为 tui.DeviceInfo。
-func (s *tuiDeviceScanner) ScanDevices() ([]tui.DeviceInfo, error) {
+// ScanDevices 扫描蓝牙 SPP 设备，转换为 core.DeviceInfo。
+func (s *deviceScanner) ScanDevices() ([]core.DeviceInfo, error) {
 	btPorts, err := discoverBtComPorts()
 	if err != nil {
 		return nil, err
@@ -38,12 +38,12 @@ func (s *tuiDeviceScanner) ScanDevices() ([]tui.DeviceInfo, error) {
 
 	fwVer := queryHidFirmwareVersion()
 
-	var devices []tui.DeviceInfo
+	var devices []core.DeviceInfo
 	idx := 1
 	for _, bp := range btPorts {
 		devName := bp.deviceName()
 		name := fmt.Sprintf("%s  %s  (%s)", devName, bp.comPort, bp.macColon)
-		devices = append(devices, tui.DeviceInfo{
+		devices = append(devices, core.DeviceInfo{
 			Index:      idx,
 			Name:       name,
 			Port:       bp.comPort,
@@ -57,17 +57,17 @@ func (s *tuiDeviceScanner) ScanDevices() ([]tui.DeviceInfo, error) {
 }
 
 // QueryDeviceDetail 通过 HID 查询设备详细信息。
-func (s *tuiDeviceScanner) QueryDeviceDetail(device tui.DeviceInfo) (*tui.DeviceDetail, error) {
+func (s *deviceScanner) QueryDeviceDetail(device core.DeviceInfo) (*core.DeviceDetail, error) {
 	client, err := hid.OpenWindowsHidClient()
 	if err != nil {
-		return &tui.DeviceDetail{
+		return &core.DeviceDetail{
 			DeviceName: device.DeviceName,
 			MAC:        device.MAC,
 		}, nil
 	}
 	defer client.Close()
 
-	detail := &tui.DeviceDetail{
+	detail := &core.DeviceDetail{
 		DeviceName: device.DeviceName,
 		MAC:        device.MAC,
 	}
@@ -111,16 +111,16 @@ func (s *tuiDeviceScanner) QueryDeviceDetail(device tui.DeviceInfo) (*tui.Device
 
 // --- FirmwareScanner 实现 ---
 
-// tuiFirmwareScanner 实现 tui.FirmwareScanner 接口。
-type tuiFirmwareScanner struct{}
+// firmwareScanner 实现 core.FirmwareScanner 接口。
+type firmwareScanner struct{}
 
-// NewTuiFirmwareScanner 创建 TUI 固件扫描器。
-func NewTuiFirmwareScanner() tui.FirmwareScanner {
-	return &tuiFirmwareScanner{}
+// NewFirmwareScanner 创建固件扫描器。
+func NewFirmwareScanner() core.FirmwareScanner {
+	return &firmwareScanner{}
 }
 
-// ScanFirmwares 扫描 blkz/ 目录，转换为 tui.FirmwareInfo。
-func (s *tuiFirmwareScanner) ScanFirmwares() ([]tui.FirmwareInfo, error) {
+// ScanFirmwares 扫描 blkz/ 目录，转换为 core.FirmwareInfo。
+func (s *firmwareScanner) ScanFirmwares() ([]core.FirmwareInfo, error) {
 	blkzDir := findBlkzDir()
 	if blkzDir == "" {
 		return nil, fmt.Errorf("未找到 blkz 固件目录")
@@ -142,7 +142,7 @@ func (s *tuiFirmwareScanner) ScanFirmwares() ([]tui.FirmwareInfo, error) {
 	}
 	sort.Strings(blkzFiles)
 
-	var fwList []tui.FirmwareInfo
+	var fwList []core.FirmwareInfo
 	for i, path := range blkzFiles {
 		filename := filepath.Base(path)
 
@@ -153,7 +153,7 @@ func (s *tuiFirmwareScanner) ScanFirmwares() ([]tui.FirmwareInfo, error) {
 
 		csResult, csErr := firmware.VerifyBlkzMd5(path)
 
-		info := tui.FirmwareInfo{
+		info := core.FirmwareInfo{
 			Index:      i + 1,
 			Path:       path,
 			Name:       filename,
@@ -190,32 +190,32 @@ func (s *tuiFirmwareScanner) ScanFirmwares() ([]tui.FirmwareInfo, error) {
 
 // --- Flasher 实现 ---
 
-// tuiFlasher 实现 tui.Flasher 接口。
-type tuiFlasher struct{}
+// flasher 实现 core.Flasher 接口。
+type flasher struct{}
 
-// NewTuiFlasher 创建 TUI 刷写执行器。
-func NewTuiFlasher() tui.Flasher {
-	return &tuiFlasher{}
+// NewFlasher 创建刷写执行器。
+func NewFlasher() core.Flasher {
+	return &flasher{}
 }
 
 // ExecuteFlash 执行固件刷写，通过回调报告进度。
 // 同时记录完整日志（设备信息、电量、固件信息、刷写步骤、进度、结果）。
-func (f *tuiFlasher) ExecuteFlash(
-	device tui.DeviceInfo,
-	fw tui.FirmwareInfo,
+func (f *flasher) ExecuteFlash(
+	device core.DeviceInfo,
+	fw core.FirmwareInfo,
 	stepCB func(step, total int, name string),
 	progressCB func(written, total int),
-) (*tui.FlashResultInfo, error) {
+) (*core.FlashResultInfo, error) {
 	// 解析固件包获取 OTA 数据
 	blkz, err := firmware.OpenBlkz(fw.Path)
 	if err != nil {
-		return &tui.FlashResultInfo{Success: false, Error: fmt.Sprintf("打开固件: %v", err)}, nil
+		return &core.FlashResultInfo{Success: false, Error: fmt.Sprintf("打开固件: %v", err)}, nil
 	}
 
 	entryIdx := fw.LanguageIndex
 	otaData, otaSize, err := getOtaData(blkz, entryIdx)
 	if err != nil {
-		return &tui.FlashResultInfo{Success: false, Error: fmt.Sprintf("获取固件数据: %v", err)}, nil
+		return &core.FlashResultInfo{Success: false, Error: fmt.Sprintf("获取固件数据: %v", err)}, nil
 	}
 
 	// --- 创建日志 ---
@@ -307,7 +307,7 @@ func (f *tuiFlasher) ExecuteFlash(
 	}
 
 	if err != nil {
-		return &tui.FlashResultInfo{
+		return &core.FlashResultInfo{
 			Success: false,
 			Error:   err.Error(),
 			Elapsed: fmt.Sprintf("%.1fs", elapsed.Seconds()),
@@ -317,7 +317,7 @@ func (f *tuiFlasher) ExecuteFlash(
 	// 发送 HID 重启指令（APPLY_OTA 已触发重启，此处是补充）
 	sendHidReset()
 
-	return &tui.FlashResultInfo{
+	return &core.FlashResultInfo{
 		Success:   true,
 		Elapsed:   fmt.Sprintf("%.1fs", elapsed.Seconds()),
 		BytesWrit: result.BytesWrite,
@@ -329,7 +329,7 @@ func (f *tuiFlasher) ExecuteFlash(
 
 // Compile-time interface compliance checks.
 var (
-	_ tui.DeviceScanner  = (*tuiDeviceScanner)(nil)
-	_ tui.FirmwareScanner = (*tuiFirmwareScanner)(nil)
-	_ tui.Flasher         = (*tuiFlasher)(nil)
+	_ core.DeviceScanner   = (*deviceScanner)(nil)
+	_ core.FirmwareScanner = (*firmwareScanner)(nil)
+	_ core.Flasher         = (*flasher)(nil)
 )

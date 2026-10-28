@@ -1,30 +1,31 @@
 // Package cmd — 手柄输入监听适配器。
 //
-// 实现 tui.GamepadMonitor 接口，使用 hid.InputMonitor
+// 实现 core.GamepadMonitor 接口，使用 hid.InputMonitor
 // 在后台持续读取 HID 输入报告，检测手柄按键/摇杆活动。
 package cmd
 
 import (
 	"sync"
 
+	"thunderstrike-controller-tool/core"
 	"thunderstrike-controller-tool/hid"
-	"thunderstrike-controller-tool/tui"
 )
 
-// tuiGamepadMonitor 实现 tui.GamepadMonitor 接口。
-type tuiGamepadMonitor struct {
+// gamepadMonitor 实现 core.GamepadMonitor 接口。
+type gamepadMonitor struct {
 	mu      sync.Mutex
 	monitor *hid.InputMonitor
 }
 
-// NewTuiGamepadMonitor 创建 TUI 手柄监听器。
-func NewTuiGamepadMonitor() tui.GamepadMonitor {
-	return &tuiGamepadMonitor{}
+// NewGamepadMonitor 创建手柄监听器。
+func NewGamepadMonitor() core.GamepadMonitor {
+	return &gamepadMonitor{}
 }
 
 // StartMonitoring 启动后台 HID 输入监听。
-// 检测到手柄输入时调用 onInput 回调。
-func (g *tuiGamepadMonitor) StartMonitoring(onInput func()) {
+// 检测到手柄输入时调用 onInput；设备上线（句柄打开成功）时调用 onReady。
+// 手柄当前不在线也可以启动：监听器会在后台等待设备上线。
+func (g *gamepadMonitor) StartMonitoring(onInput func(), onReady func()) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -34,19 +35,13 @@ func (g *tuiGamepadMonitor) StartMonitoring(onInput func()) {
 		g.monitor = nil
 	}
 
-	// 尝试打开 HID 设备
-	monitor, err := hid.NewInputMonitor()
-	if err != nil || monitor == nil {
-		// 设备未连接或出错，静默失败
-		return
-	}
-
+	monitor := hid.NewInputMonitor()
 	g.monitor = monitor
-	monitor.Start(onInput)
+	monitor.Start(onInput, onReady)
 }
 
 // StopMonitoring 停止后台 HID 输入监听。
-func (g *tuiGamepadMonitor) StopMonitoring() {
+func (g *gamepadMonitor) StopMonitoring() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -57,4 +52,4 @@ func (g *tuiGamepadMonitor) StopMonitoring() {
 }
 
 // 编译时接口检查
-var _ tui.GamepadMonitor = (*tuiGamepadMonitor)(nil)
+var _ core.GamepadMonitor = (*gamepadMonitor)(nil)

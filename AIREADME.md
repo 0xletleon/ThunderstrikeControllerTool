@@ -8,7 +8,7 @@
 ## 项目概述
 
 NVIDIA SHIELD TV 2017（中国版）配套的 **Thunderstrike** 蓝牙手柄固件管理工具。
-Go 语言编写，仅支持 Windows，通过蓝牙连接手柄。
+Go 语言编写，仅支持 Windows，通过蓝牙连接手柄。界面为原生窗口（MyGo 自绘）。
 
 核心能力：设备信息读取（HID）、固件刷写/降级/升级/平刷（SPP）、刷写后自动重启（HID CMD_RESET）。
 
@@ -222,34 +222,75 @@ nv-recovery-image-shield-2017-atv-9.2.1\vendor.ext4\oem\firmware\
 
 实测：V1.33 → V1.18 降级成功，CSR 芯片版本同步降级（v0.18 → v0.17），热词引擎同步降级（v1.05 → v1.04）。
 
+## 界面层架构
+
+界面只有一套（原生 GUI），与业务层解耦：
+
+| 包 | 技术 | 说明 |
+|---|---|---|
+| `gui/` | MyGo 原生自绘 UI（`github.com/egoist/mygo v0.7.1`，版本锁定） | 窗口 920×640，页面状态机 + 5 个视图文件 |
+
+- `core/` 定义 `DeviceScanner`、`FirmwareScanner`、`Flasher`、`GamepadMonitor` 四个接口与全部数据类型，`gui` 只依赖 `core`，不碰业务实现。
+- 业务实现集中在 `cmd/adapter.go`（界面适配器）与 `cmd/gamepad_monitor.go`。
+- **线程模型**：界面状态只在主线程读写。后台 goroutine（设备扫描、HID 查询、刷写回调）统一通过 `Model.post` → `mygo.Window.Update` 投递修改，禁止直接改字段；`post` 在窗口尚未建立时同步执行，便于单元测试。
+- **Go 版本**：mygo v0.7.1 要求 Go ≥ 1.27.3（`go.mod` 已声明）。低于该版本时 `GOTOOLCHAIN=auto` 会自动下载工具链，首次构建需要联网。
+- **DPI**：窗口尺寸按 DIP 计，125% 缩放下 920×640 实际占 1150×800 物理像素，窗口尺寸需给屏幕留余量；内容超出可视高度时由 `ui.Scroll` 滚动。
+- **布局要点**：`Spacer` 本身即吸收剩余空间，不要再叠加 `Grow`；根容器必须用 `c.Size()` 显式设置宽高，否则内部 `FillWidth` 缺少参照会导致横向溢出。
+
+### 手柄输入监听
+
+`hid/input_monitor.go` 负责把「手柄被按了」变成界面反馈（右上角指示器 + 底部状态栏）。三个关键点：
+
+- 手柄注册了**两个** HID 集合（蓝牙 HID 服务路径 `hid#{00001124-...}` 与物理设备路径 `hid#vid_0955&pid_7214#...`，均 UsagePage=0x0001/Usage=0x0005，输入报告 233 字节）。按键上报可能落在任一个，所以 `findThunderstrikeHidPaths()` 返回全部路径，监听器为每个集合起一个阻塞读循环。
+- 每个句柄**阻塞读，不做超时取消**。早期实现每 500ms `CancelIoEx` 强杀句柄，导致手柄静止时一直在「打开-取消-断开-重连」循环，按键落在重连空窗期就丢。现在只有 `Close()` 才打断读。
+- 设备不在线时每 2 秒重试，手柄休眠或被刷写重启后无需重启程序；`onReady` 回调让界面区分「等待手柄 / 手柄就绪 / 手柄活动」三态。
+
+诊断命令：
+
+```
+go test ./hid -run TestListHidCollections -v   # 列出手柄所有 HID 集合
+```
+
+### GUI 视图测试
+
+`gui/views_test.go` 用 `ui.NewTester` 在内存中渲染，不需要打开窗口：
+
+```
+go test ./gui
+```
+
+- `TestSnapshots` 把 9 种页面状态渲染为 PNG，输出到 `.opencode/temp/renders/`（可用 `GUI_SNAPSHOT_DIR` 覆盖），用于人工核对布局。
+- `TestClickDeviceOpensDetail`、`TestClickFirmwareOpensLanguages` 用 `Tester.ClickAt` 验证点击链路。
+
 ## 项目结构
 
 ```
 ThunderstrikeControllerTool/
 ├── main.go                         # 程序入口
+├── core/                           # 界面层共用类型与接口（不依赖任何 UI）
+│   ├── types.go                    # 设备/固件/刷写数据结构 + 步骤与语言表
+│   └── interfaces.go               # 四个业务接口 + Services 聚合
+├── gui/                            # 原生 GUI 层（MyGo 自绘）
+│   ├── run.go                      # 窗口、页面状态机、异步流程
+│   ├── theme.go                    # 主题、徽章、卡片、进度条等通用组件
+│   ├── view_devices.go             # 扫描状态 / 设备列表
+│   ├── view_detail.go              # 设备信息与电量
+│   ├── view_firmware.go            # 固件列表与语言选择
+│   ├── view_flash.go               # 刷写进度与结果
+│   ├── keys.go                     # 键盘快捷键与页面返回/刷新逻辑
+│   └── views_test.go               # 渲染快照 + 点击链路测试
 ├── cmd/                            # 业务逻辑层
-│   ├── tui_adapter.go              # TUI 接口适配器（设备扫描、HID 查询、刷写）
+│   ├── adapter.go                  # 界面适配器（设备扫描、HID 查询、刷写）
 │   ├── flash_core.go               # 刷写核心逻辑（共用）
 │   ├── bt_discovery_windows.go     # WMI 查询蓝牙 SPP COM 口
 │   ├── helpers.go                 # 辅助函数（HID 查询、序列号提取、电池查询）
 │   └── gamepad_monitor.go         # 手柄输入监听适配器
-├── tui/                           # TUI 层（Bubble Tea）
-│   ├── model.go                   # 主状态机（页面切换）
-│   ├── device_list.go             # 设备列表视图（含在线/休眠状态）
-│   ├── device_info_view.go        # 设备信息视图
-│   ├── firmware_list.go           # 固件列表视图
-│   ├── flash_progress.go          # 刷写进度视图
-│   ├── language_select.go         # 多语言固件选择
-│   ├── gamepad_indicator.go        # 手柄输入指示器
-│   ├── styles.go                  # NVIDIA 品牌色样式
-│   ├── ascii_title.go             # ASCII Art 标题
-│   ├── text_align.go              # 中英文对齐工具
-│   ├── types.go                   # 数据传递类型
-│   └── run.go                    # TUI 启动入口
 ├── hid/                           # HID 协议
 │   ├── commands.go                # 159 个命令枚举 + 协议常量
 │   ├── windows_client.go          # Windows HID API 客户端 + BatteryInfo 解析
-│   └── input_monitor.go          # HID 输入监听（后台读取输入报告）
+│   ├── input_monitor.go           # HID 输入监听（多集合阻塞读 + 自动重连）
+│   ├── input_monitor_test.go      # 监听器就绪/关闭测试
+│   └── hid_probe_test.go          # 诊断：列出所有 HID 集合
 ├── spp/                           # 蓝牙 SPP 协议栈
 │   ├── protocol.go                # 命令码、状态码、超时、UpgradeTimings
 │   ├── client.go                  # SPP 客户端（WriteCommand/ReadResponse/Connect）
