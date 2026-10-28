@@ -5,3 +5,7 @@ Release/*.exe*
 avatar-gen/
 .opencode/
 Release/ext4imgtool/
+*.log
+crash.txt
+err.txt
+out.txt
