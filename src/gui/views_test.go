@@ -27,7 +27,7 @@ func snapshot(t *testing.T, name string, m *Model) {
 	t.Helper()
 
 	// 与窗口默认尺寸保持一致，快照才代表真实比例。
-	tester := ui.NewTester(m.View, 920, 640)
+	tester := ui.NewTester(m.View, 780, 440)
 	tester.Frame()
 
 	f, err := os.Create(filepath.Join(snapshotDir(), name+".png"))
@@ -81,28 +81,28 @@ func demoDetail() *core.DeviceDetail {
 func demoFirmwares() []core.FirmwareInfo {
 	return []core.FirmwareInfo{
 		{
-			Index:     1,
-			Name:      "Thunderstrike_0x010E.blkz",
-			Version:   "1.14",
+			Index:      1,
+			Name:       "Thunderstrike_0x010E.blkz",
+			Version:    "1.14",
 			VersionHex: "010E",
-			Checksum:  "match",
-			OtaSize:   318_464,
+			Checksum:   "match",
+			OtaSize:    318_464,
 		},
 		{
-			Index:     2,
-			Name:      "Thunderstrike_0x0112.blkz",
-			Version:   "1.18",
+			Index:      2,
+			Name:       "Thunderstrike_0x0112.blkz",
+			Version:    "1.18",
 			VersionHex: "0112",
-			Checksum:  "unknown",
-			OtaSize:   322_560,
+			Checksum:   "unknown",
+			OtaSize:    322_560,
 		},
 		{
-			Index:     3,
-			Name:      "Thunderstrike_0x0124.blkz",
-			Version:   "1.36",
+			Index:      3,
+			Name:       "Thunderstrike_0x0124.blkz",
+			Version:    "1.36",
 			VersionHex: "0124",
-			Checksum:  "mismatch",
-			OtaSize:   330_752,
+			Checksum:   "mismatch",
+			OtaSize:    330_752,
 		},
 	}
 }
@@ -131,11 +131,11 @@ func TestClickDeviceOpensDetail(t *testing.T) {
 		svc:     core.Services{Scanner: fakeScanner{}},
 	}
 
-	tester := ui.NewTester(m.View, 920, 640)
+	tester := ui.NewTester(m.View, 780, 440)
 	tester.Frame()
 
 	// 第一行的中部
-	tester.ClickAt(400, 168)
+	tester.ClickAt(300, 140)
 	tester.Frame()
 
 	if m.page != screenDetail {
@@ -159,11 +159,11 @@ func TestClickFirmwareOpensLanguages(t *testing.T) {
 		svc:       core.Services{Firmwares: fakeFirmwareScanner{}},
 	}
 
-	tester := ui.NewTester(m.View, 920, 640)
+	tester := ui.NewTester(m.View, 780, 440)
 	tester.Frame()
 
 	// 第一行的中部
-	tester.ClickAt(400, 170)
+	tester.ClickAt(300, 140)
 	tester.Frame()
 
 	if m.page != screenLanguages {

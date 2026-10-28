@@ -228,15 +228,27 @@ nv-recovery-image-shield-2017-atv-9.2.1\vendor.ext4\oem\firmware\
 
 | 包 | 技术 | 说明 |
 |---|---|---|
-| `src/gui/` | MyGo 原生自绘 UI（`github.com/egoist/mygo v0.7.1`，版本锁定） | 窗口 920×640，页面状态机 + 5 个视图文件 |
+| `src/gui/` | MyGo 原生自绘 UI（`github.com/egoist/mygo v0.7.1`，版本锁定） | 窗口 780×440，深色单屏，页面状态机 + 5 个视图文件 |
 
 - `src/core/` 定义 `DeviceScanner`、`FirmwareScanner`、`Flasher`、`GamepadMonitor` 四个接口与全部数据类型，`gui` 只依赖 `core`，不碰业务实现。
 - 业务实现集中在 `src/cmd/adapter.go`（界面适配器）与 `src/cmd/gamepad_monitor.go`。
 - 所有业务包位于 `src/` 下，main.go 留在仓库根目录（`build.bat` 依旧在根目录执行 `go build .`）。
 - **线程模型**：界面状态只在主线程读写。后台 goroutine（设备扫描、HID 查询、刷写回调）统一通过 `Model.post` → `mygo.Window.Update` 投递修改，禁止直接改字段；`post` 在窗口尚未建立时同步执行，便于单元测试。
 - **Go 版本**：mygo v0.7.1 要求 Go ≥ 1.27.3（`go.mod` 已声明）。低于该版本时 `GOTOOLCHAIN=auto` 会自动下载工具链，首次构建需要联网。
-- **DPI**：窗口尺寸按 DIP 计，125% 缩放下 920×640 实际占 1150×800 物理像素，窗口尺寸需给屏幕留余量；内容超出可视高度时由 `ui.Scroll` 滚动。
+- **DPI**：窗口尺寸按 DIP 计，实际物理像素 = 尺寸 × 系统缩放比例（本机 150% 时 780×440 约合 1170×660）；内容超出可视高度时由 `ui.Scroll` 滚动。
 - **布局要点**：`Spacer` 本身即吸收剩余空间，不要再叠加 `Grow`；根容器必须用 `c.Size()` 显式设置宽高，否则内部 `FillWidth` 缺少参照会导致横向溢出。
+
+### 视觉规范
+
+对齐 NVIDIA 官方品牌（只有绿 `#76B900`、黑、白三色）：
+
+- **深色为唯一形态**，不跟随系统主题：背景 `#0F0F0F`、面板 `#171717`、描边 `#2A2A2A`。
+- **单一品牌绿**：强调、成功、在线、进度全部用 `#76B900`，不再另设成功色，避免一个绿兼五种语义。
+- **斜切是唯一的装饰语言**（NVIDIA 标识体系的倾斜感）：页头 logo 用 `Skew(-8, 0)`；纯色块可直接斜，带文字的容器需再 `Skew(+8, 0)` 抵消文字倾斜。**内置按钮不吃 Skew**，主按钮保持直角以保证键盘焦点与 hover 反馈。
+- **数字承载信息**：版本号 / 电量 32px，刷写百分比 56px，其余信息 10–12px 灰字。信息层级靠字号拉开，不靠颜色。
+- **自绘标题栏**：`TitleBarStyle: mygo.TitleBarHidden` + `TitleBarHeight = 48`。系统标题栏是浅色的，会与深色界面割裂；隐藏后页头用 `c.TitleBar().Right` 让出窗口控件宽度，并调用 `DragWindow()` 作为拖拽区。
+- **版式常量**：`headerHeight 48 / footerHeight 40 / contentPadding 14` 统一定义在 `theme.go`，视图计算可用高度时引用 `bodyHeight(c)`。
+- **交互简化**：只有一台手柄时扫描后直接进设备信息页，省掉列表这一屏；多设备才出列表。
 
 ### 手柄输入监听
 

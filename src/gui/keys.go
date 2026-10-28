@@ -116,7 +116,7 @@ func (m *Model) refreshCurrent() {
 	}
 }
 
-// hintText 返回当前页的快捷键提示，显示在底部操作栏。
+// hintText 返回当前页的快捷键提示，显示在底部状态条。
 func (m *Model) hintText() string {
 	switch m.page {
 	case screenScanning:
@@ -124,16 +124,16 @@ func (m *Model) hintText() string {
 	case screenDevices:
 		return "↑↓ 选择 · Enter 打开 · F5 刷新 · Ctrl+Q 退出"
 	case screenDetail:
-		return "F 刷写固件 · Esc 返回 · F5 重新读取 · Ctrl+Q 退出"
+		return "F 刷写固件 · Esc 返回 · F5 重新读取"
 	case screenFirmwares:
 		return "↑↓ 选择 · Enter 刷写 · Esc 返回 · F5 重新扫描"
 	case screenLanguages:
 		return "↑↓ 选择 · Enter 确认 · Esc 返回"
 	case screenFlashing:
 		if m.flashing {
-			return "刷写中，已锁定键盘操作"
+			return "操作已锁定"
 		}
-		return "Enter 或 Esc 返回设备列表"
+		return "Enter 返回设备列表"
 	}
 	return ""
 }

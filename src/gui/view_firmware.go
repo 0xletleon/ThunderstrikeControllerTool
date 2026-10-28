@@ -10,38 +10,47 @@ import (
 	"thunderstrike-controller-tool/src/core"
 )
 
-// viewFirmwares 渲染固件列表页：blkz 包、版本、大小与校验状态。
+// viewFirmwares 渲染固件列表页。行高压缩到 52，版本号是每行唯一的粗体，
+// 文件名退为次要信息。
 func (m *Model) viewFirmwares(c *ui.Context) {
-	sectionTitle(c, "选择固件", "固件包位于程序目录下的 blkz/ 中，校验状态来自内置 MD5 记录")
-
+	hint := "固件包位于程序目录的 blkz/ 中"
 	if m.fwLoading {
-		card(c).FillWidth().MarginY(12).Children(func() {
-			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-				ui.Spinner(c)
-				ui.Text(c, "正在扫描 blkz 固件目录…").FontSize(13).TextColor(colorMuted)
-			})
-		})
-		return
+		hint = "正在扫描 blkz 目录…"
 	}
+
+	sectionHead(c, "选择固件", hint, func() {
+		if ui.Button(c, "重新扫描").Clicked() {
+			m.openFirmwares()
+		}
+	})
+
+	ui.Box(c).Height(12)
 
 	if m.fwErr != "" {
-		ui.Box(c).FillWidth().MarginY(12).Children(func() {
-			noticeErr(c, "读取固件目录失败："+m.fwErr)
-		})
+		ui.Box(c).FillWidth().Padding(8, 10).Radius(4).
+			Background(colorPanelAlt).
+			Children(func() {
+				ui.Text(c, "读取固件目录失败："+m.fwErr).FontSize(11).
+					TextColor(colorDanger).Wrap()
+			})
+		ui.Box(c).Height(10)
 	}
 
-	if len(m.firmwares) == 0 {
-		card(c).FillWidth().MarginY(12).Children(func() {
-			ui.Column(c).Gap(6).Center().PaddingY(18).Children(func() {
-				ui.Text(c, "没有可用的固件包").FontSize(15).Bold()
-				ui.Text(c, "请把 .blkz 固件包放到程序目录的 blkz/ 文件夹后重新扫描").
-					FontSize(13).TextColor(colorMuted)
-			})
+	if m.fwLoading || len(m.firmwares) == 0 {
+		ui.Column(c).FillWidth().Padding(52, 0).Center().Gap(8).Children(func() {
+			if m.fwLoading {
+				ui.Spinner(c)
+				ui.Text(c, "正在扫描…").FontSize(12).TextColor(colorTextMuted)
+				return
+			}
+			ui.Text(c, "没有可用的固件包").FontSize(13).TextColor(colorTextMuted)
+			ui.Text(c, "把 .blkz 文件放进 blkz/ 后点击「重新扫描」").
+				FontSize(11).TextColor(colorTextFaint)
 		})
 		return
 	}
 
-	ui.Column(c).FillWidth().Gap(6).MarginY(12).Children(func() {
+	ui.Column(c).FillWidth().Gap(4).Children(func() {
 		for i := range m.firmwares {
 			m.firmwareRow(c, i)
 		}
@@ -52,18 +61,18 @@ func (m *Model) viewFirmwares(c *ui.Context) {
 func (m *Model) firmwareRow(c *ui.Context, i int) {
 	fw := m.firmwares[i]
 	blocked := fw.Checksum == "mismatch" || fw.Checksum == "error"
+	selected := i == m.fwIdx && !blocked
 
-	row := ui.Row(c).FillWidth().Padding(10, 12).Gap(14).
-		Background(c.Theme().Surface).Radius(10).Border(1, colorLine).
-		AlignItems(ui.Center)
+	row := ui.Row(c).FillWidth().Height(52).Padding(0, 12).Gap(12).
+		Background(colorPanel).Radius(4).AlignItems(ui.Center)
 
 	switch {
-	case i == m.fwIdx && !blocked:
-		row.Background(colorRowSel).BorderColor(colorBrand).ScrollIntoView()
+	case selected:
+		row.Background(colorPanelAlt).Border(1, colorBrandTrack)
 	case blocked:
-		row.BorderColor(chipErrBg)
+		// 校验失败的固件保持暗色，不给 hover 反馈
 	case row.Hovered():
-		row.Background(colorRowHover)
+		row.Background(colorPanelAlt)
 	}
 
 	if !blocked {
@@ -74,46 +83,43 @@ func (m *Model) firmwareRow(c *ui.Context, i int) {
 	}
 
 	row.Children(func() {
-		ui.Column(c).Gap(2).Width(360).Children(func() {
-			ui.Text(c, fw.Name).FontSize(14).Bold().TextColor(c.Theme().Text).
-				Ellipsis("…")
-			ui.Text(c, fmt.Sprintf("%s · %s", humanSize(fw.OtaSize), versionHex(fw.VersionHex))).
-				FontSize(12).TextColor(colorMuted)
+		ui.Text(c, "V"+fw.Version).FontSize(14).Bold().
+			TextColor(colorText).Width(58)
+
+		ui.Column(c).Gap(3).Grow(1).Children(func() {
+			ui.Text(c, fw.Name).FontSize(12).TextColor(colorTextMuted).
+				Ellipsis("…").NoWrap()
+			ui.Text(c, fmt.Sprintf("%s · 0x%s", humanSize(fw.OtaSize), orDash(fw.VersionHex))).
+				FontSize(10).TextColor(colorTextFaint)
 		})
 
-		ui.Text(c, "V"+fw.Version).FontSize(14).Bold().
-			TextColor(c.Theme().Text).Width(80)
-
-		// 校验状态
 		switch fw.Checksum {
 		case "match":
-			chipOK(c, "校验通过")
+			chip(c, "校验通过", colorBrand)
 		case "mismatch":
-			chipErr(c, "MD5 不符")
+			chip(c, "MD5 不符", colorDanger)
 		case "unknown":
-			chipWarn(c, "未收录")
+			chip(c, "未收录", colorWarning)
 		case "error":
-			chipErr(c, "校验出错")
+			chip(c, "校验出错", colorDanger)
 		default:
-			chipNeutral(c, "未知")
+			chip(c, "未知", colorTextFaint)
 		}
 
-		// 多语言固件标记
 		if fw.IsLocale && len(fw.Languages) > 0 {
-			chipNeutral(c, fmt.Sprintf("%d 种语言", len(fw.Languages)))
+			chip(c, fmt.Sprintf("%d 语言", len(fw.Languages)), colorTextMuted)
 		}
 
-		// 与当前设备版本比较
+		// 低于设备当前版本时标一个小黄点，不占用徽章位置
 		if m.selected.FwVersion != "" && versionLower(fw.Version, m.selected.FwVersion) {
-			chipWarn(c, "降级")
+			ui.Box(c).Size(5, 5).Radius(2.5).Background(colorWarning).
+				Tooltip("降级：低于当前固件版本")
 		}
-
-		ui.Spacer(c)
 
 		if blocked {
-			ui.Text(c, "已禁用").FontSize(13).TextColor(colorDanger)
+			ui.Text(c, "×").FontSize(14).TextColor(colorTextFaint)
 		} else {
-			ui.Text(c, "刷写 ›").FontSize(13).TextColor(colorBrand)
+			ui.Text(c, "›").FontSize(15).TextColor(colorTextFaint)
 		}
 	})
 }
@@ -121,41 +127,44 @@ func (m *Model) firmwareRow(c *ui.Context, i int) {
 // viewLanguages 渲染多语言固件的语言选择页。
 func (m *Model) viewLanguages(c *ui.Context) {
 	fw := m.pendingFw
-	sectionTitle(c, "选择语言版本",
-		fmt.Sprintf("%s  ·  V%s  ·  多语言固件", fw.Name, fw.Version))
+
+	sectionHead(c, "选择语言",
+		fmt.Sprintf("%s  ·  V%s", fw.Name, fw.Version), nil)
+
+	ui.Box(c).Height(12)
 
 	if len(fw.Languages) == 0 {
-		card(c).FillWidth().MarginY(12).Children(func() {
-			ui.Text(c, "该固件包没有可用的语言条目").FontSize(13).TextColor(colorMuted)
-		})
+		ui.Text(c, "该固件包没有可用的语言条目").
+			FontSize(12).TextColor(colorTextMuted)
 		return
 	}
 
-	ui.Column(c).FillWidth().Gap(6).MarginY(12).Children(func() {
+	ui.Column(c).FillWidth().Gap(4).Children(func() {
 		for i, lang := range fw.Languages {
 			idx := i
 			code := lang
 
-			row := ui.Row(c).FillWidth().Padding(10, 12).Gap(14).
-				Background(c.Theme().Surface).Radius(10).Border(1, colorLine).
-				AlignItems(ui.Center)
+			row := ui.Row(c).FillWidth().Height(44).Padding(0, 12).Gap(12).
+				Background(colorPanel).Radius(4).AlignItems(ui.Center)
 
 			switch {
 			case idx == m.langIdx:
-				row.Background(colorRowSel).BorderColor(colorBrand).ScrollIntoView()
+				row.Background(colorPanelAlt).Border(1, colorBrandTrack)
 			case row.Hovered():
-				row.Background(colorRowHover)
+				row.Background(colorPanelAlt)
 			}
 
 			row.OnClick(func() {
 				m.langIdx = idx
 				m.chooseLanguage(idx)
 			})
+
 			row.Children(func() {
 				ui.Text(c, core.LanguageDisplayName(code)).
-					FontSize(14).TextColor(c.Theme().Text)
+					FontSize(12).TextColor(colorText)
+				ui.Text(c, code).FontSize(10).TextColor(colorTextFaint)
 				ui.Spacer(c)
-				ui.Text(c, "刷写此版本 ›").FontSize(13).TextColor(colorBrand)
+				ui.Text(c, "›").FontSize(15).TextColor(colorTextFaint)
 			})
 		}
 	})
@@ -171,14 +180,6 @@ func humanSize(n int) string {
 	default:
 		return fmt.Sprintf("%d KB", n/1024)
 	}
-}
-
-// versionHex 返回带 0x 前缀的十六进制版本号。
-func versionHex(hex string) string {
-	if hex == "" {
-		return "0x----"
-	}
-	return "0x" + hex
 }
 
 // versionLower 判断版本 a 是否低于 b（按点分十进制逐段比较）。

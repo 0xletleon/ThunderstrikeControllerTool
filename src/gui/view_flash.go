@@ -6,148 +6,146 @@ import (
 	"path/filepath"
 
 	"github.com/egoist/mygo/ui"
+
+	"thunderstrike-controller-tool/src/core"
 )
 
-// viewFlash 渲染刷写页：左侧步骤列表，右侧写入进度；结束后显示结果。
+// viewFlash 渲染刷写页。整个界面唯一"戏剧化"的地方：
+// 大号百分比 + 分段步骤条，其余全部压到最小。
 func (m *Model) viewFlash(c *ui.Context) {
 	fw := m.pendingFw
-	hint := fmt.Sprintf("从 V%s 刷写到 V%s", m.selected.FwVersion, fw.Version)
+
+	hint := fmt.Sprintf("V%s → V%s", orDash(m.selected.FwVersion), fw.Version)
 	if m.selected.FwVersion != "" && versionLower(fw.Version, m.selected.FwVersion) {
 		hint += "（降级）"
 	}
-	sectionTitle(c, "刷写固件", hint)
+	sectionHead(c, "刷写固件", hint, nil)
 
-	if m.flashing {
-		ui.Box(c).FillWidth().MarginY(8).Children(func() {
-			noticeWarn(c, "刷写过程中请保持手柄连接、不要关闭程序或断电。")
-		})
-	}
+	ui.Box(c).Height(20)
 
-	ui.Row(c).FillWidth().Gap(14).MarginY(12).AlignItems(ui.Start).Children(func() {
-		card(c).Width(340).Children(func() {
-			ui.Text(c, "刷写步骤").FontSize(12).Bold().TextColor(colorMuted).
-				Padding(0, 0, 8, 0)
-			for i := range m.steps {
-				m.stepRow(c, i)
-			}
-		})
+	done := m.result != nil && m.result.Success
 
-		card(c).Grow(1).Children(func() {
-			ui.Text(c, "写入进度").FontSize(12).Bold().TextColor(colorMuted).
-				Padding(0, 0, 8, 0)
+	// 主体在可用高度内垂直居中
+	ui.Column(c).FillWidth().MinHeight(bodyHeight(c) - 46).
+		Justify(ui.Center).
+		Children(func() {
+			// 成功后不再展示百分比与步骤：信息已完成使命，只留结果
+			if !done {
+				// 大号百分比，整页视觉锚点
+				ui.Row(c).FillWidth().Justify(ui.Center).AlignItems(ui.End).Gap(2).
+					Children(func() {
+						ui.Text(c, fmt.Sprintf("%d", m.prog.Percent)).
+							FontSize(56).Bold().TextColor(colorBrand)
+						ui.Text(c, "%").FontSize(16).TextColor(colorBrand).
+							Padding(0, 0, 12, 0)
+					})
 
-			ui.Row(c).Gap(10).AlignItems(ui.End).Children(func() {
-				ui.Text(c, fmt.Sprintf("%d", m.prog.Percent)).
-					FontSize(38).Bold().TextColor(colorBrand)
-				ui.Text(c, "%").FontSize(16).TextColor(colorBrand).Padding(0, 0, 8, 0)
-				ui.Spacer(c)
-				if m.prog.TotalBytes > 0 {
-					ui.Text(c, fmt.Sprintf("%s / %s",
-						humanSize(m.prog.BytesWritten), humanSize(m.prog.TotalBytes))).
-						FontSize(13).TextColor(colorMuted).Padding(0, 0, 8, 0)
-				}
-			})
+				ui.Box(c).Height(14)
 
-			ui.Box(c).PaddingY(8).Children(func() {
-				bar(c, float32(m.prog.Ratio()), colorBrand)
-			})
-
-			if m.flashing && m.prog.Percent == 0 {
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					ui.Spinner(c)
-					ui.Text(c, "等待设备响应…").FontSize(13).TextColor(colorMuted)
+				// 细进度条居中，两侧留白让它成为一个「读数」而不是页面元素
+				ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
+					ui.Box(c).Width(440).Children(func() {
+						bar(c, float32(m.prog.Ratio()), colorBrand)
+					})
 				})
+
+				if m.prog.TotalBytes > 0 {
+					ui.Box(c).Height(8)
+					ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
+						ui.Text(c, fmt.Sprintf("%s / %s",
+							humanSize(m.prog.BytesWritten), humanSize(m.prog.TotalBytes))).
+							FontSize(10).TextColor(colorTextFaint)
+					})
+				}
+
+				ui.Box(c).Height(30)
+
+				// 步骤：横向分段条 + 名称
+				ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
+					ui.Column(c).Width(440).Gap(7).Children(func() {
+						segBar(c, len(m.steps), m.curStep, done)
+						stepLegend(c, stepNames(m.steps), m.curStep, done)
+					})
+				})
+
+				if m.flashing {
+					ui.Box(c).Height(22)
+					ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
+						ui.Text(c, "请保持手柄连接，不要关闭程序").
+							FontSize(11).TextColor(colorTextFaint)
+					})
+				}
+			}
+
+			if m.result != nil {
+				m.resultBlock(c)
 			}
 		})
-	})
-
-	if m.result != nil {
-		m.resultCard(c)
-	}
 }
 
-// stepRow 渲染单个刷写步骤。
-func (m *Model) stepRow(c *ui.Context, i int) {
-	step := m.steps[i]
-
-	var icon, color string
-	active := step.Index == m.curStep
-	switch {
-	case step.Done:
-		icon, color = "✓", "done"
-	case active:
-		icon, color = "→", "active"
-	default:
-		icon, color = "○", "pending"
-	}
-
-	var fg ui.Color
-	var nameColor ui.Color
-	switch color {
-	case "done":
-		fg = colorSuccess
-		nameColor = colorMuted
-	case "active":
-		fg = colorBrand
-		nameColor = c.Theme().Text
-	default:
-		fg = ui.Hex("#B0B4BA")
-		nameColor = colorMuted
-	}
-
-	ui.Row(c).FillWidth().Gap(10).PaddingY(5).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, icon).FontSize(14).Bold().TextColor(fg).Width(16)
-		ui.Text(c, fmt.Sprintf("%d/%d", step.Index, step.Total)).
-			FontSize(12).TextColor(colorMuted).Width(34)
-		ui.Text(c, step.Name).FontSize(14).TextColor(nameColor)
-		if active && m.flashing {
-			ui.Spacer(c)
-			ui.Text(c, "进行中").FontSize(12).TextColor(colorBrand)
-		}
-	})
-}
-
-// resultCard 渲染刷写结果卡片（成功或失败）。
-func (m *Model) resultCard(c *ui.Context) {
+// resultBlock 渲染刷写结果。成功与失败用同一种结构，只换颜色和内容。
+func (m *Model) resultBlock(c *ui.Context) {
 	res := m.result
+	ok := res.Success
 
-	if res.Success {
-		card(c).FillWidth().Border(1, colorSuccess).Children(func() {
-			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "✓").FontSize(20).Bold().TextColor(colorSuccess)
-				ui.Text(c, "刷写成功").FontSize(16).Bold().TextColor(colorSuccess)
-				ui.Spacer(c)
-				chipOK(c, "已完成")
-			})
-
-			ui.Box(c).Padding(8, 0, 0, 0).Children(func() {
-				infoRow(c, "耗时", res.Elapsed)
-				infoRow(c, "写入", humanSize(res.BytesWrit))
-				infoRow(c, "版本", fmt.Sprintf("V%s → V%s", res.FromVer, res.ToVer))
-				infoRow(c, "日志", shortPath(res.LogPath))
-			})
-
-			ui.Text(c, "手柄正在重启，稍后可在设备列表中重新连接查看版本。").
-				FontSize(12).TextColor(colorMuted).Padding(6, 0, 0, 0)
-		})
-		return
+	fg := colorDanger
+	mark := "✗"
+	title := "刷写失败"
+	if ok {
+		fg = colorBrand
+		mark = "✓"
+		title = "刷写完成"
 	}
 
-	card(c).FillWidth().Border(1, colorDanger).Children(func() {
-		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "✗").FontSize(20).Bold().TextColor(colorDanger)
-			ui.Text(c, "刷写失败").FontSize(16).Bold().TextColor(colorDanger)
+	ui.Box(c).Height(24)
+
+	ui.Column(c).FillWidth().Padding(14, 16).Radius(4).Gap(10).
+		Background(colorPanel).Border(1, fg).
+		Children(func() {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, mark).FontSize(13).Bold().TextColor(fg)
+				ui.Text(c, title).FontSize(13).Bold().TextColor(fg)
+			})
+
+			if ok {
+				ui.Row(c).FillWidth().Gap(28).Children(func() {
+					inlineKV(c, "耗时", res.Elapsed)
+					inlineKV(c, "版本", fmt.Sprintf("V%s → V%s", res.FromVer, res.ToVer))
+					inlineKV(c, "写入", humanSize(res.BytesWrit))
+				})
+				if path := shortPath(res.LogPath); path != "" {
+					ui.Text(c, path).FontSize(10).TextColor(colorTextMuted).Selectable()
+				}
+				ui.Text(c, "手柄正在重启，稍后可重新连接查看版本").
+					FontSize(10).TextColor(colorTextMuted).Padding(4, 0, 0, 0)
+				return
+			}
+
+			ui.Text(c, res.Error).FontSize(11).TextColor(colorTextMuted).
+				Wrap().Selectable()
+			ui.Text(c, "固件未改变，可检查电量与连接后重试").
+				FontSize(10).TextColor(colorTextFaint)
 		})
-		ui.Box(c).Padding(8, 0, 0, 0).Children(func() {
-			ui.Text(c, res.Error).FontSize(13).TextColor(c.Theme().Text).Wrap().
-				Selectable()
-		})
-		ui.Text(c, "手柄固件未改变。可检查电量、重新连接手柄后重试。").
-			FontSize(12).TextColor(colorMuted).Padding(6, 0, 0, 0)
+}
+
+// inlineKV 渲染横向排列的「标签 值」，用于结果摘要。
+func inlineKV(c *ui.Context, key, value string) {
+	ui.Column(c).Grow(1).Gap(2).Children(func() {
+		ui.Text(c, key).FontSize(10).TextColor(colorTextFaint)
+		ui.Text(c, value).FontSize(12).TextColor(colorTextMuted)
 	})
 }
 
-// shortPath 把绝对路径转成相对当前目录的短路径，便于阅读。
+// stepNames 提取刷写步骤名称。
+func stepNames(steps []core.FlashStep) []string {
+	names := make([]string, len(steps))
+	for i, s := range steps {
+		names[i] = s.Name
+	}
+	return names
+}
+
+// shortPath 把绝对路径转成相对当前目录的短路径。
 func shortPath(path string) string {
 	if path == "" {
 		return ""

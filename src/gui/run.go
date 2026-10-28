@@ -34,10 +34,7 @@ type Model struct {
 	svc core.Services
 	win *mygo.Window
 
-	dark     bool // 系统是否为暗色外观（首次建帧时锁定）
-	themeSet bool
-	page     screen
-
+	page screen
 	// 设备扫描
 	devices  []core.DeviceInfo
 	devIdx   int
@@ -81,13 +78,17 @@ func Run(svc core.Services) error {
 	mygo.App.WhenReady(func() {
 		m.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:           "Thunderstrike Controller Tool",
-			Width:           920,
-			Height:          640,
-			MinWidth:        820,
-			MinHeight:       540,
-			BackgroundColor: "#F2F3F5",
-			StateKey:        "main",
-			Content:         ui.View(m.View),
+			Width:           780,
+			Height:          440,
+			MinWidth:        700,
+			MinHeight:       400,
+			BackgroundColor: "#0F0F0F",
+			// 自绘标题栏：系统标题栏是浅色的，与深色界面割裂；
+			// 隐藏后窗口控件浮在右上角，页头让出对应宽度。
+			TitleBarStyle:  mygo.TitleBarHidden,
+			TitleBarHeight: int(headerHeight),
+			StateKey:       "main",
+			Content:        ui.View(m.View),
 		})
 		m.start()
 	})
@@ -124,11 +125,7 @@ func (m *Model) start() {
 
 // View 构建整窗界面：页头 + 页面内容 + 底部操作栏。
 func (m *Model) View(c *ui.Context) {
-	if !m.themeSet {
-		m.dark = c.Theme().Dark
-		m.themeSet = true
-	}
-	c.SetTheme(buildTheme(m.dark))
+	c.SetTheme(buildTheme())
 	theme := c.Theme()
 
 	// 先处理键盘，再按新状态构建本帧。
@@ -139,9 +136,8 @@ func (m *Model) View(c *ui.Context) {
 	ui.Column(c).Width(w).Height(h).Background(theme.Background).Children(func() {
 		m.header(c)
 
-		// 内容超过可视高度时可滚动，窗口大小不影响内容可达性。
 		ui.Box(c).Grow(1).FillWidth().Children(func() {
-			ui.Scroll(c).Fill().Padding(16, 20).Children(func() {
+			ui.Scroll(c).Fill().Padding(contentPadding, 16).Children(func() {
 				switch m.page {
 				case screenScanning, screenDevices:
 					m.viewDevices(c)
@@ -161,95 +157,65 @@ func (m *Model) View(c *ui.Context) {
 	})
 }
 
-// header 渲染页头：品牌标识、标题与手柄活动指示器。
+// header 渲染页头：斜切品牌标识、名称、手柄状态与版本。
+// 窗口用自绘标题栏，控件浮在右上角，这里同时承担拖拽区职责。
 func (m *Model) header(c *ui.Context) {
-	theme := c.Theme()
+	tb := c.TitleBar()
 
-	ui.Row(c).FillWidth().Padding(12, 20).Gap(14).
-		Background(theme.Surface).
-		BorderWidth(0, 0, 1, 0).BorderColor(colorLine).
-		AlignItems(ui.Center).
-		Children(func() {
-			ui.Box(c).Size(42, 42).Radius(10).Background(colorBrand).Center().
-				Children(func() {
-					ui.Text(c, "TS").Bold().FontSize(16).TextColor(ui.Hex("#FFFFFF"))
-				})
+	row := ui.Row(c).FillWidth().Height(headerHeight).Padding(0, 16).Gap(10).
+		AlignItems(ui.Center)
+	if tb.Right > 0 {
+		row.PaddingEnd(tb.Right + 8)
+	}
+	row.DragWindow()
 
-			ui.Column(c).Gap(3).Children(func() {
-				ui.Text(c, "Thunderstrike Controller Tool").
-					FontSize(18).Bold().TextColor(theme.Text)
-				ui.Text(c, "NVIDIA SHIELD TV 2017 手柄固件管理").
-					FontSize(12).TextColor(colorMuted)
-			})
+	row.Children(func() {
+		brandMark(c, 15)
 
-			ui.Spacer(c)
+		ui.Text(c, "THUNDERSTRIKE").FontSize(12).Bold().
+			LetterSpacing(1.4).TextColor(colorText)
+		ui.Text(c, "SHIELD TV 2017").FontSize(11).TextColor(colorTextFaint)
 
-			m.padIndicator(c)
-			ui.Text(c, "@0xletleon "+appVersion).FontSize(12).TextColor(colorMuted)
-		})
+		ui.Spacer(c)
+
+		m.padIndicator(c)
+		ui.Text(c, appVersion).FontSize(11).TextColor(colorTextFaint)
+	})
+
+	hairlineBrand(c)
 }
 
-// padIndicator 渲染手柄输入指示器：设备在线变灰绿，收到输入时点亮。
+// padIndicator 渲染手柄指示器：未就绪为暗点，就绪为深绿，收到输入时亮绿。
 func (m *Model) padIndicator(c *ui.Context) {
-	dot := ui.Hex("#C9CDD3")
-	label := "等待手柄"
-	bg := chipNeBg
+	dot := colorTextFaint
+	text := "等待手柄"
 	switch {
 	case m.padActive:
 		dot = colorBrand
-		label = "手柄活动"
-		bg = chipOkBg
+		text = "手柄活动"
 	case m.padReady:
-		dot = colorSuccess
-		label = "手柄就绪"
+		dot = colorBrandDark
+		text = "手柄就绪"
 	}
 
-	ui.Row(c).Gap(6).Padding(5, 10).Radius(10).Background(bg).
-		AlignItems(ui.Center).
-		Children(func() {
-			ui.Box(c).Size(8, 8).Radius(4).Background(dot)
-			ui.Text(c, label).FontSize(12).TextColor(colorMuted)
-		})
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Box(c).Size(6, 6).Radius(3).Background(dot)
+		ui.Text(c, text).FontSize(11).TextColor(colorTextMuted)
+	})
 }
 
-// footer 渲染底部操作栏，按钮随页面变化。
+// footer 渲染底部状态条。主要操作放在页面标题行，这里只留刷写完成后的返回。
 func (m *Model) footer(c *ui.Context) {
-	footerBar(c, m.statusText(), m.hintText(), func() {
-		switch m.page {
-		case screenScanning, screenDevices:
-			if ui.Button(c, "刷新设备").Clicked() {
-				m.refreshDevices()
-			}
-
-		case screenDetail:
-			if ui.Button(c, "返回设备列表").Clicked() {
-				m.page = screenDevices
-			}
-			if ui.PrimaryButton(c, "刷写固件").Clicked() {
-				m.openFirmwares()
-			}
-
-		case screenFirmwares:
-			if ui.Button(c, "返回设备信息").Clicked() {
-				m.page = screenDetail
-			}
-			if ui.Button(c, "重新扫描").Clicked() {
-				m.openFirmwares()
-			}
-
-		case screenLanguages:
-			if ui.Button(c, "返回固件列表").Clicked() {
-				m.page = screenFirmwares
-			}
-
-		case screenFlashing:
-			if m.result != nil {
-				if ui.PrimaryButton(c, "返回设备列表").Clicked() {
-					m.resetToDevices()
-				}
+	var trailing func()
+	if m.page == screenFlashing && m.result != nil {
+		trailing = func() {
+			if ui.PrimaryButton(c, "返回设备列表").Clicked() {
+				m.resetToDevices()
 			}
 		}
-	})
+	}
+
+	footerBar(c, m.statusText(), m.hintText(), trailing)
 }
 
 // statusText 返回底部状态栏文案。
@@ -304,16 +270,25 @@ func (m *Model) refreshDevices() {
 		devices, err := m.svc.Scanner.ScanDevices()
 		m.post(func() {
 			m.scanning = false
-			m.page = screenDevices
 			if err != nil {
 				m.scanErr = err.Error()
 				m.devices = nil
+				m.page = screenDevices
 				return
 			}
+
 			m.devices = devices
 			if m.devIdx >= len(devices) {
 				m.devIdx = 0
 			}
+
+			// 只有一台手柄时跳过列表页，直接进设备信息
+			if len(devices) == 1 {
+				m.openDevice(devices[0])
+				return
+			}
+
+			m.page = screenDevices
 		})
 	}()
 }
