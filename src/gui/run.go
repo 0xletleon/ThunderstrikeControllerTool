@@ -43,12 +43,6 @@ type Model struct {
 	prog     core.FlashProgressInfo
 	flashing bool
 	result   *core.FlashResultInfo
-
-	// 手柄输入指示
-	padReady  bool
-	padActive bool
-	padShown  atomic.Bool
-	padLastNs atomic.Int64
 }
 
 // Run 创建窗口并运行 GUI，直到用户关闭窗口。
@@ -59,9 +53,9 @@ func Run(svc core.Services) error {
 		m.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:           "Thunderstrike Controller Tool",
 			Width:           760,
-			Height:          700,
-			MinWidth:        680,
-			MinHeight:       560,
+			Height:          772,
+			MinWidth:        700,
+			MinHeight:       520,
 			BackgroundColor: "#FFFFFF",
 			// 自绘标题栏：系统标题栏是浅灰的，与白底界面割裂
 			TitleBarStyle:  mygo.TitleBarHidden,
@@ -73,10 +67,6 @@ func Run(svc core.Services) error {
 
 	if err := mygo.App.Run(); err != nil {
 		return err
-	}
-
-	if svc.Monitor != nil {
-		svc.Monitor.StopMonitoring()
 	}
 	return nil
 }
@@ -91,11 +81,8 @@ func (m *Model) post(fn func()) {
 	m.win.Update(fn)
 }
 
-// start 在窗口建立后启动手柄监听与首次扫描。
+// start 在窗口建立后启动首次扫描。
 func (m *Model) start() {
-	if m.svc.Monitor != nil {
-		m.svc.Monitor.StartMonitoring(m.onGamepadInput, m.onGamepadReady)
-	}
 	m.refreshAll()
 }
 
@@ -104,18 +91,22 @@ func (m *Model) View(c *ui.Context) {
 	c.SetTheme(buildTheme())
 	m.handleKeys(c)
 
-	// 完全自然流：页头 / 设备 / 固件 / 操作 / 状态依次排列。
-	// 不设 Width：FillWidth 会按窗口宽度算，不扣内边距，导致右侧被裁。
+	// 中间内容区用 Grow(1)+Basis(0) 吃掉剩余空间，
+	// 让操作区与状态栏自然落到窗口底部。
 	ui.Column(c).Fill().Background(colorBg).Children(func() {
 		m.headerBar(c)
-		m.deviceBlock(c)
-		m.firmwareBlock(c)
+
+		ui.Box(c).Grow(1).Basis(0).FillWidth().Children(func() {
+			m.deviceBlock(c)
+			m.firmwareBlock(c)
+		})
+
 		m.actionBlock(c)
 		m.statusBar(c)
 	})
 }
 
-// headerBar 渲染页头：品牌、手柄状态与版本。
+// headerBar 渲染页头：品牌与版本。
 func (m *Model) headerBar(c *ui.Context) {
 	tb := c.TitleBar()
 
@@ -134,30 +125,10 @@ func (m *Model) headerBar(c *ui.Context) {
 
 		ui.Spacer(c)
 
-		m.padDot(c)
 		ui.Text(c, appVersion).FontSize(10).TextColor(colorTextFaint)
 	})
 
 	hairline(c)
-}
-
-// padDot 渲染手柄连接状态：等待 / 就绪 / 有输入。
-func (m *Model) padDot(c *ui.Context) {
-	dot := colorTextFaint
-	text := "等待手柄"
-	switch {
-	case m.padActive:
-		dot = colorBrand
-		text = "手柄活动"
-	case m.padReady:
-		dot = colorBrandDark
-		text = "手柄就绪"
-	}
-
-	ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
-		ui.Box(c).Size(6, 6).Radius(3).Background(dot)
-		ui.Text(c, text).FontSize(10).TextColor(colorTextMuted)
-	})
 }
 
 // --- 数据加载 ---
@@ -369,36 +340,4 @@ func (m *Model) statusText() string {
 		return "手柄休眠中 · 按键唤醒后点右上角「刷新」"
 	}
 	return fmt.Sprintf("%s  ·  %s", orDash(dev.DeviceName), orDash(dev.Port))
-}
-
-// --- 手柄输入指示 ---
-
-// onGamepadReady 由 HID 监听在句柄打开（设备在线）时调用。
-func (m *Model) onGamepadReady() {
-	m.post(func() { m.padReady = true })
-}
-
-// onGamepadInput 由 HID 监听在后台 goroutine 中调用。
-// 只在状态切换时重绘，避免摇杆连续输入导致高频刷新。
-func (m *Model) onGamepadInput() {
-	m.padLastNs.Store(time.Now().UnixNano())
-
-	if m.padShown.CompareAndSwap(false, true) {
-		m.post(func() {
-			m.padActive = true
-			m.padReady = true
-		})
-		time.AfterFunc(400*time.Millisecond, m.padCooldown)
-	}
-}
-
-// padCooldown 在输入停止后把指示器切回就绪。
-func (m *Model) padCooldown() {
-	last := time.Unix(0, m.padLastNs.Load())
-	if time.Since(last) < 400*time.Millisecond {
-		time.AfterFunc(200*time.Millisecond, m.padCooldown)
-		return
-	}
-	m.padShown.Store(false)
-	m.post(func() { m.padActive = false })
 }

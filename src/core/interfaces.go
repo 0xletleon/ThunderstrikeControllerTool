@@ -25,20 +25,9 @@ type Flasher interface {
 	) (*FlashResultInfo, error)
 }
 
-// GamepadMonitor 手柄输入监听接口（由 cmd 包实现）。
-type GamepadMonitor interface {
-	// StartMonitoring 启动后台监听。
-	// onInput 在手柄有按键/摇杆输入时调用；
-	// onReady 在 HID 句柄成功打开（设备在线）时调用，可为 nil。
-	StartMonitoring(onInput func(), onReady func())
-	// StopMonitoring 停止后台监听。
-	StopMonitoring()
-}
-
 // Services 汇总一套界面所需的全部业务能力。
 type Services struct {
 	Scanner   DeviceScanner
 	Firmwares FirmwareScanner
 	Flasher   Flasher
-	Monitor   GamepadMonitor
 }

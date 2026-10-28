@@ -91,20 +91,20 @@ const (
 	CmdSetTransport    BtHidrawCommand = 0x49 // Set transport
 	CmdFactoryReset    BtHidrawCommand = 0x4A // Factory reset
 	// CMD_75 through CMD_97 are unnamed reserved commands (0x4B–0x61)
-	CmdPhoneHome       BtHidrawCommand = 0x62 // Phone home
-	CmdWakeupSource    BtHidrawCommand = 0x63 // Wakeup source
-	CmdQueryDevice     BtHidrawCommand = 0x64 // Query device
-	CmdSetLinkPolicy   BtHidrawCommand = 0x65 // Set link policy
-	CmdGetLinkPolicy   BtHidrawCommand = 0x66 // Get link policy
+	CmdPhoneHome     BtHidrawCommand = 0x62 // Phone home
+	CmdWakeupSource  BtHidrawCommand = 0x63 // Wakeup source
+	CmdQueryDevice   BtHidrawCommand = 0x64 // Query device
+	CmdSetLinkPolicy BtHidrawCommand = 0x65 // Set link policy
+	CmdGetLinkPolicy BtHidrawCommand = 0x66 // Get link policy
 	// CMD_103 through CMD_116 are unnamed reserved commands (0x67–0x74)
-	CmdFeature         BtHidrawCommand = 0x52 // Feature bits
-	CmdHotword         BtHidrawCommand = 0x54 // Hotword
-	CmdBacklight       BtHidrawCommand = 0x75 // Backlight
+	CmdFeature   BtHidrawCommand = 0x52 // Feature bits
+	CmdHotword   BtHidrawCommand = 0x54 // Hotword
+	CmdBacklight BtHidrawCommand = 0x75 // Backlight
 	// CMD_118 through CMD_155 are unnamed reserved commands (0x76–0x9B)
 	CmdHotwordLanguage BtHidrawCommand = 0x98 // Hotword language
 	// CMD_155 through CMD_157 are unnamed reserved commands (0x9B–0x9D)
-	CmdError           BtHidrawCommand = 0x9E // Error
-	CmdMax             BtHidrawCommand = 0x9F // Max sentinel
+	CmdError BtHidrawCommand = 0x9E // Error
+	CmdMax   BtHidrawCommand = 0x9F // Max sentinel
 )
 
 // commandNames maps command ordinals to their smali enum names.
@@ -132,8 +132,8 @@ var commandNames = map[BtHidrawCommand]string{
 	CmdGetIrMacro: "GET_IR_MACRO", CmdSetIrEvent: "SET_IR_EVENT",
 	CmdReadStat: "READ_STAT", CmdReadyAccelReg: "READY_ACCEL_REG",
 	CmdSetFactoryPair: "SET_FACTORY_PAIR",
-	CmdTestmodeResult:  "TESTMODE_RESULT",
-	CmdJsRaw: "JS_RAW", CmdJsCalibration: "JS_CALIBRATION",
+	CmdTestmodeResult: "TESTMODE_RESULT",
+	CmdJsRaw:          "JS_RAW", CmdJsCalibration: "JS_CALIBRATION",
 	CmdDeadzone: "DEADZONE", CmdDumpLog: "DUMP_LOG", CmdReset: "RESET",
 	CmdAudio: "AUDIO", CmdPairing: "PAIRING", CmdHaptics: "HAPTICS",
 	CmdChargeState: "CHARGE_STATE", CmdDebugLevel: "DEBUG_LEVEL",

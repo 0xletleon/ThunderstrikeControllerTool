@@ -21,7 +21,6 @@ func main() {
 		Scanner:   cmd.NewDeviceScanner(),
 		Firmwares: cmd.NewFirmwareScanner(),
 		Flasher:   cmd.NewFlasher(),
-		Monitor:   cmd.NewGamepadMonitor(),
 	}
 
 	if err := gui.Run(svc); err != nil {

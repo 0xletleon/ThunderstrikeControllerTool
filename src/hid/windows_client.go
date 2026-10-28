@@ -169,6 +169,27 @@ func findThunderstrikeHidPaths() ([]string, error) {
 	return paths, nil
 }
 
+// openPath 以只读共享方式打开指定 HID 接口路径，失败返回 0。
+// 用于诊断测试（列出 HID 集合）等只读场景。
+func openPath(path string) uintptr {
+	pathUTF16, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return 0
+	}
+
+	handle, _, _ := procCreateFile.Call(
+		uintptr(unsafe.Pointer(pathUTF16)),
+		genericRead,
+		fileShareAll,
+		0, openExisting, 0, 0,
+	)
+	invalidHandle := uintptr(^uintptr(0))
+	if handle == 0 || handle == invalidHandle {
+		return 0
+	}
+	return handle
+}
+
 // OpenWindowsHidClient opens the Thunderstrike HID device for read/write.
 func OpenWindowsHidClient() (*WindowsHidClient, error) {
 	devicePath, err := FindThunderstrikeHidDevice()
