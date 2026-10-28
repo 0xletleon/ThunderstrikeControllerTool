@@ -67,7 +67,7 @@ Go 语言编写，仅支持 Windows，通过蓝牙连接手柄。界面为原生
 
 ### HID 命令码（设备信息查询 + 重启）
 
-完整 159 个命令枚举见 `hid/commands.go`。实际使用的：
+完整 159 个命令枚举见 `src/hid/commands.go`。实际使用的：
 
 | 命令 | Code | 说明 |
 |------|------|------|
@@ -147,7 +147,7 @@ PC 端无法自动重连蓝牙，本工具的策略：
 原版 APK `Bt_Ops.requestReboot()` 调用 `requestData(CMD_RESET, 1)`。
 实测确认：发送后设备断开约 1 秒，然后自动重连。
 
-实现见 `cmd/helpers.go` 的 `sendHidReset()`：
+实现见 `src/cmd/helpers.go` 的 `sendHidReset()`：
 - 打开 HID 设备 → `SendCommand(CmdReset, [0x01])`
 - 设备收到后立即断开，`ReadFile` 超时属正常，只要 `WriteFile` 成功即可
 
@@ -228,10 +228,11 @@ nv-recovery-image-shield-2017-atv-9.2.1\vendor.ext4\oem\firmware\
 
 | 包 | 技术 | 说明 |
 |---|---|---|
-| `gui/` | MyGo 原生自绘 UI（`github.com/egoist/mygo v0.7.1`，版本锁定） | 窗口 920×640，页面状态机 + 5 个视图文件 |
+| `src/gui/` | MyGo 原生自绘 UI（`github.com/egoist/mygo v0.7.1`，版本锁定） | 窗口 920×640，页面状态机 + 5 个视图文件 |
 
-- `core/` 定义 `DeviceScanner`、`FirmwareScanner`、`Flasher`、`GamepadMonitor` 四个接口与全部数据类型，`gui` 只依赖 `core`，不碰业务实现。
-- 业务实现集中在 `cmd/adapter.go`（界面适配器）与 `cmd/gamepad_monitor.go`。
+- `src/core/` 定义 `DeviceScanner`、`FirmwareScanner`、`Flasher`、`GamepadMonitor` 四个接口与全部数据类型，`gui` 只依赖 `core`，不碰业务实现。
+- 业务实现集中在 `src/cmd/adapter.go`（界面适配器）与 `src/cmd/gamepad_monitor.go`。
+- 所有业务包位于 `src/` 下，main.go 留在仓库根目录（`build.bat` 依旧在根目录执行 `go build .`）。
 - **线程模型**：界面状态只在主线程读写。后台 goroutine（设备扫描、HID 查询、刷写回调）统一通过 `Model.post` → `mygo.Window.Update` 投递修改，禁止直接改字段；`post` 在窗口尚未建立时同步执行，便于单元测试。
 - **Go 版本**：mygo v0.7.1 要求 Go ≥ 1.27.3（`go.mod` 已声明）。低于该版本时 `GOTOOLCHAIN=auto` 会自动下载工具链，首次构建需要联网。
 - **DPI**：窗口尺寸按 DIP 计，125% 缩放下 920×640 实际占 1150×800 物理像素，窗口尺寸需给屏幕留余量；内容超出可视高度时由 `ui.Scroll` 滚动。
@@ -239,7 +240,7 @@ nv-recovery-image-shield-2017-atv-9.2.1\vendor.ext4\oem\firmware\
 
 ### 手柄输入监听
 
-`hid/input_monitor.go` 负责把「手柄被按了」变成界面反馈（右上角指示器 + 底部状态栏）。三个关键点：
+`src/hid/input_monitor.go` 负责把「手柄被按了」变成界面反馈（右上角指示器 + 底部状态栏）。三个关键点：
 
 - 手柄注册了**两个** HID 集合（蓝牙 HID 服务路径 `hid#{00001124-...}` 与物理设备路径 `hid#vid_0955&pid_7214#...`，均 UsagePage=0x0001/Usage=0x0005，输入报告 233 字节）。按键上报可能落在任一个，所以 `findThunderstrikeHidPaths()` 返回全部路径，监听器为每个集合起一个阻塞读循环。
 - 每个句柄**阻塞读，不做超时取消**。早期实现每 500ms `CancelIoEx` 强杀句柄，导致手柄静止时一直在「打开-取消-断开-重连」循环，按键落在重连空窗期就丢。现在只有 `Close()` 才打断读。
@@ -248,15 +249,15 @@ nv-recovery-image-shield-2017-atv-9.2.1\vendor.ext4\oem\firmware\
 诊断命令：
 
 ```
-go test ./hid -run TestListHidCollections -v   # 列出手柄所有 HID 集合
+go test ./src/hid -run TestListHidCollections -v   # 列出手柄所有 HID 集合
 ```
 
 ### GUI 视图测试
 
-`gui/views_test.go` 用 `ui.NewTester` 在内存中渲染，不需要打开窗口：
+`src/gui/views_test.go` 用 `ui.NewTester` 在内存中渲染，不需要打开窗口：
 
 ```
-go test ./gui
+go test ./src/gui
 ```
 
 - `TestSnapshots` 把 9 种页面状态渲染为 PNG，输出到 `.opencode/temp/renders/`（可用 `GUI_SNAPSHOT_DIR` 覆盖），用于人工核对布局。
@@ -267,47 +268,48 @@ go test ./gui
 ```
 ThunderstrikeControllerTool/
 ├── main.go                         # 程序入口
-├── core/                           # 界面层共用类型与接口（不依赖任何 UI）
-│   ├── types.go                    # 设备/固件/刷写数据结构 + 步骤与语言表
-│   └── interfaces.go               # 四个业务接口 + Services 聚合
-├── gui/                            # 原生 GUI 层（MyGo 自绘）
-│   ├── run.go                      # 窗口、页面状态机、异步流程
-│   ├── theme.go                    # 主题、徽章、卡片、进度条等通用组件
-│   ├── view_devices.go             # 扫描状态 / 设备列表
-│   ├── view_detail.go              # 设备信息与电量
-│   ├── view_firmware.go            # 固件列表与语言选择
-│   ├── view_flash.go               # 刷写进度与结果
-│   ├── keys.go                     # 键盘快捷键与页面返回/刷新逻辑
-│   └── views_test.go               # 渲染快照 + 点击链路测试
-├── cmd/                            # 业务逻辑层
-│   ├── adapter.go                  # 界面适配器（设备扫描、HID 查询、刷写）
-│   ├── flash_core.go               # 刷写核心逻辑（共用）
-│   ├── bt_discovery_windows.go     # WMI 查询蓝牙 SPP COM 口
-│   ├── helpers.go                 # 辅助函数（HID 查询、序列号提取、电池查询）
-│   └── gamepad_monitor.go         # 手柄输入监听适配器
-├── hid/                           # HID 协议
-│   ├── commands.go                # 159 个命令枚举 + 协议常量
-│   ├── windows_client.go          # Windows HID API 客户端 + BatteryInfo 解析
-│   ├── input_monitor.go           # HID 输入监听（多集合阻塞读 + 自动重连）
-│   ├── input_monitor_test.go      # 监听器就绪/关闭测试
-│   └── hid_probe_test.go          # 诊断：列出所有 HID 集合
-├── spp/                           # 蓝牙 SPP 协议栈
-│   ├── protocol.go                # 命令码、状态码、超时、UpgradeTimings
-│   ├── client.go                  # SPP 客户端（WriteCommand/ReadResponse/Connect）
-│   ├── flasher.go                 # 刷写流程（NOP→ERASE→WRITE→VALIDATE→APPLY）
-│   └── hidraw_client.go           # [遗留] HID-over-SPP 客户端（已被 HID API 替代）
-├── firmware/                      # 固件解析
-│   ├── blkz.go                    # .blkz 包解析+解压
-│   ├── blkz_test.go               # blkz 解析测试
-│   ├── manifest.go                # manifest.xml 解析
-│   └── checksum.go                # MD5 校验（内置 6 个已知固件哈希）
-├── logger/                        # 刷写日志记录
-│   └── logger.go                  # 时间戳日志文件
-├── Release/                       # 编译打包目录
-│   ├── Release.zip                # 包含了手柄固件+刷写工具
-│   ├── tsct.exe                   # 编译产物
-│   ├── blkz/                      # 固件包目录（6 个 .blkz）
-│   └── logs/                      # 刷写日志目录
+├── src/                            # 全部业务与界面代码（import 前缀 src/）
+│   ├── core/                       # 界面层共用类型与接口（不依赖任何 UI）
+│   │   ├── types.go                # 设备/固件/刷写数据结构 + 步骤与语言表
+│   │   └── interfaces.go           # 四个业务接口 + Services 聚合
+│   ├── gui/                        # 原生 GUI 层（MyGo 自绘）
+│   │   ├── run.go                  # 窗口、页面状态机、异步流程
+│   │   ├── theme.go                # 主题、徽章、卡片、进度条等通用组件
+│   │   ├── keys.go                 # 键盘快捷键与页面返回/刷新逻辑
+│   │   ├── view_devices.go         # 扫描状态 / 设备列表
+│   │   ├── view_detail.go          # 设备信息与电量
+│   │   ├── view_firmware.go        # 固件列表与语言选择
+│   │   ├── view_flash.go           # 刷写进度与结果
+│   │   └── views_test.go           # 渲染快照 + 点击链路测试
+│   ├── cmd/                        # 业务逻辑层
+│   │   ├── adapter.go              # 界面适配器（设备扫描、HID 查询、刷写）
+│   │   ├── flash_core.go           # 刷写核心逻辑
+│   │   ├── bt_discovery_windows.go # WMI 查询蓝牙 SPP COM 口
+│   │   ├── helpers.go              # 辅助函数（HID 查询、序列号提取、电池查询）
+│   │   └── gamepad_monitor.go      # 手柄输入监听适配器
+│   ├── hid/                        # HID 协议
+│   │   ├── commands.go             # 159 个命令枚举 + 协议常量
+│   │   ├── windows_client.go       # Windows HID API 客户端 + BatteryInfo 解析
+│   │   ├── input_monitor.go        # HID 输入监听（多集合阻塞读 + 自动重连）
+│   │   ├── input_monitor_test.go   # 监听器就绪/关闭测试
+│   │   └── hid_probe_test.go       # 诊断：列出所有 HID 集合
+│   ├── spp/                        # 蓝牙 SPP 协议栈
+│   │   ├── protocol.go             # 命令码、状态码、超时、UpgradeTimings
+│   │   ├── client.go               # SPP 客户端（WriteCommand/ReadResponse/Connect）
+│   │   ├── flasher.go              # 刷写流程（NOP→ERASE→WRITE→VALIDATE→APPLY）
+│   │   └── hidraw_client.go        # [遗留] HID-over-SPP 客户端（已被 HID API 替代）
+│   ├── firmware/                   # 固件解析
+│   │   ├── blkz.go                 # .blkz 包解析+解压
+│   │   ├── blkz_test.go            # blkz 解析测试
+│   │   ├── manifest.go             # manifest.xml 解析
+│   │   └── checksum.go             # MD5 校验（内置 6 个已知固件哈希）
+│   └── logger/                     # 刷写日志记录
+│       └── logger.go               # 时间戳日志文件
+├── Release/                        # 编译打包目录
+│   ├── Release.zip                 # 包含了手柄固件+刷写工具
+│   ├── tsct.exe                    # 编译产物
+│   ├── blkz/                       # 固件包目录（6 个 .blkz）
+│   └── logs/                       # 刷写日志目录
 ```
 
 ## 逆向分析来源

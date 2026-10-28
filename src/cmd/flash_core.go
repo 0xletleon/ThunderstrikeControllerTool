@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"go.bug.st/serial"
-	"thunderstrike-controller-tool/firmware"
-	"thunderstrike-controller-tool/spp"
+	"thunderstrike-controller-tool/src/firmware"
+	"thunderstrike-controller-tool/src/spp"
 )
 
 // FlashOptions 控制刷写行为的参数集。

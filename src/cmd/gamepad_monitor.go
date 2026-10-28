@@ -7,8 +7,8 @@ package cmd
 import (
 	"sync"
 
-	"thunderstrike-controller-tool/core"
-	"thunderstrike-controller-tool/hid"
+	"thunderstrike-controller-tool/src/core"
+	"thunderstrike-controller-tool/src/hid"
 )
 
 // gamepadMonitor 实现 core.GamepadMonitor 接口。

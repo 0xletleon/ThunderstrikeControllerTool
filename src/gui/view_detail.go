@@ -5,7 +5,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"thunderstrike-controller-tool/core"
+	"thunderstrike-controller-tool/src/core"
 )
 
 // viewDetail 渲染设备信息页：HID 查询到的版本、序列号与电量。

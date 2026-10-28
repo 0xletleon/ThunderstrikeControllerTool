@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"go.bug.st/serial"
-	"thunderstrike-controller-tool/hid"
+	"thunderstrike-controller-tool/src/hid"
 )
 
 // ReportLen is the HID report length for SPP transport.

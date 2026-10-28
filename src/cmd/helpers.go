@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"thunderstrike-controller-tool/hid"
+	"thunderstrike-controller-tool/src/hid"
 )
 
 // queryHidFirmwareVersion 通过 HID 快速查询固件版本号，失败返回空字符串。

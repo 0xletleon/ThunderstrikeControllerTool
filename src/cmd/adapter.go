@@ -12,11 +12,11 @@ import (
 	"sort"
 	"time"
 
-	"thunderstrike-controller-tool/core"
-	"thunderstrike-controller-tool/firmware"
-	"thunderstrike-controller-tool/hid"
-	"thunderstrike-controller-tool/logger"
-	"thunderstrike-controller-tool/spp"
+	"thunderstrike-controller-tool/src/core"
+	"thunderstrike-controller-tool/src/firmware"
+	"thunderstrike-controller-tool/src/hid"
+	"thunderstrike-controller-tool/src/logger"
+	"thunderstrike-controller-tool/src/spp"
 )
 
 // --- DeviceScanner 实现 ---

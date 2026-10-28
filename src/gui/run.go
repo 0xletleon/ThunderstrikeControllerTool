@@ -8,7 +8,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	"thunderstrike-controller-tool/core"
+	"thunderstrike-controller-tool/src/core"
 )
 
 // appVersion 显示在页头的版本号。

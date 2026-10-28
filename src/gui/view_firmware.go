@@ -7,7 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"thunderstrike-controller-tool/core"
+	"thunderstrike-controller-tool/src/core"
 )
 
 // viewFirmwares 渲染固件列表页：blkz 包、版本、大小与校验状态。

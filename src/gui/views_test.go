@@ -8,7 +8,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"thunderstrike-controller-tool/core"
+	"thunderstrike-controller-tool/src/core"
 )
 
 // snapshotDir 返回渲染快照的输出目录。默认写到 .opencode/temp/renders，
@@ -16,7 +16,7 @@ import (
 func snapshotDir() string {
 	dir := os.Getenv("GUI_SNAPSHOT_DIR")
 	if dir == "" {
-		dir = filepath.Join("..", ".opencode", "temp", "renders")
+		dir = filepath.Join("..", "..", ".opencode", "temp", "renders")
 	}
 	_ = os.MkdirAll(dir, 0o755)
 	return dir

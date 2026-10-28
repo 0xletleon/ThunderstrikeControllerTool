@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"os"
 
-	"thunderstrike-controller-tool/cmd"
-	"thunderstrike-controller-tool/core"
-	"thunderstrike-controller-tool/gui"
+	"thunderstrike-controller-tool/src/cmd"
+	"thunderstrike-controller-tool/src/core"
+	"thunderstrike-controller-tool/src/gui"
 )
 
 func main() {
