@@ -26,8 +26,7 @@ func snapshotDir() string {
 func snapshot(t *testing.T, name string, m *Model) {
 	t.Helper()
 
-	// 与窗口默认尺寸保持一致，快照才代表真实比例。
-	tester := ui.NewTester(m.View, 780, 440)
+	tester := ui.NewTester(m.View, 708, 562)
 	tester.Frame()
 
 	f, err := os.Create(filepath.Join(snapshotDir(), name+".png"))
@@ -41,7 +40,7 @@ func snapshot(t *testing.T, name string, m *Model) {
 	}
 }
 
-// demoDevices 返回两个演示设备：在线与休眠各一个。
+// demoDevices 返回两台演示设备：在线与休眠各一台。
 func demoDevices() []core.DeviceInfo {
 	return []core.DeviceInfo{
 		{
@@ -77,7 +76,7 @@ func demoDetail() *core.DeviceDetail {
 	}
 }
 
-// demoFirmwares 返回三个固件包：校验通过、未收录、MD5 不符。
+// demoFirmwares 返回四个固件包：校验通过、未收录、多语言、MD5 不符。
 func demoFirmwares() []core.FirmwareInfo {
 	return []core.FirmwareInfo{
 		{
@@ -93,11 +92,21 @@ func demoFirmwares() []core.FirmwareInfo {
 			Name:       "Thunderstrike_0x0112.blkz",
 			Version:    "1.18",
 			VersionHex: "0112",
-			Checksum:   "unknown",
+			Checksum:   "match",
 			OtaSize:    322_560,
 		},
 		{
 			Index:      3,
+			Name:       "Thunderstrike_locale_0x0121.blkz",
+			Version:    "1.33",
+			VersionHex: "0121",
+			Checksum:   "match",
+			OtaSize:    328_704,
+			IsLocale:   true,
+			Languages:  []string{"en_us", "zh_cn", "ja_jp"},
+		},
+		{
+			Index:      4,
 			Name:       "Thunderstrike_0x0124.blkz",
 			Version:    "1.36",
 			VersionHex: "0124",
@@ -123,120 +132,57 @@ func (fakeFirmwareScanner) ScanFirmwares() ([]core.FirmwareInfo, error) {
 	return demoFirmwares(), nil
 }
 
-// TestClickDeviceOpensDetail 验证点击设备行会切换到设备信息页。
-func TestClickDeviceOpensDetail(t *testing.T) {
-	m := &Model{
-		page:    screenDevices,
-		devices: demoDevices(),
-		svc:     core.Services{Scanner: fakeScanner{}},
-	}
-
-	tester := ui.NewTester(m.View, 780, 440)
-	tester.Frame()
-
-	// 第一行的中部
-	tester.ClickAt(300, 140)
-	tester.Frame()
-
-	if m.page != screenDetail {
-		t.Fatalf("点击设备行后应在设备信息页，实际为 %v", m.page)
-	}
-	if m.selected.Port != "COM3" {
-		t.Fatalf("选中的设备应为 COM3，实际为 %q", m.selected.Port)
-	}
-}
-
-// TestClickFirmwareOpensLanguages 验证点击多语言固件会先进入语言选择页。
-func TestClickFirmwareOpensLanguages(t *testing.T) {
-	firmwares := demoFirmwares()
-	firmwares[0].IsLocale = true
-	firmwares[0].Languages = []string{"en_us", "zh_cn"}
-
-	m := &Model{
-		page:      screenFirmwares,
-		firmwares: firmwares,
-		selected:  demoDevices()[0],
-		svc:       core.Services{Firmwares: fakeFirmwareScanner{}},
-	}
-
-	tester := ui.NewTester(m.View, 780, 440)
-	tester.Frame()
-
-	// 第一行的中部
-	tester.ClickAt(300, 140)
-	tester.Frame()
-
-	if m.page != screenLanguages {
-		t.Fatalf("点击多语言固件后应在语言选择页，实际为 %v", m.page)
-	}
-}
-
-// newBaseModel 返回一个带演示设备的初始模型。Model 内含 atomic 字段，
-// 不能按值复制，因此每个用例都新建一份。
-func newBaseModel() *Model {
+// newTestModel 返回一个填好演示数据的模型。
+func newTestModel() *Model {
 	return &Model{
-		page:     screenDevices,
-		devices:  demoDevices(),
-		selected: demoDevices()[0],
+		devices:   demoDevices(),
+		detail:    demoDetail(),
+		firmwares: demoFirmwares(),
+		svc: core.Services{
+			Scanner:   fakeScanner{},
+			Firmwares: fakeFirmwareScanner{},
+		},
 	}
 }
 
-// TestSnapshots 渲染全部页面状态，产出 PNG 供人工核对。
+// TestSnapshots 渲染各种状态，产出 PNG 供人工核对。
 func TestSnapshots(t *testing.T) {
 	cases := []struct {
 		name  string
 		setup func(m *Model)
 	}{
-		{"01_devices", func(m *Model) {
-			m.page = screenDevices
+		{"01_ready", func(m *Model) {
+			// 默认：设备在线、固件列表、待刷写
 		}},
 		{"02_scanning", func(m *Model) {
-			m.page = screenScanning
 			m.scanning = true
-		}},
-		{"03_devices_empty", func(m *Model) {
-			m.page = screenDevices
 			m.devices = nil
+			m.detail = nil
 		}},
-		{"04_detail", func(m *Model) {
-			m.page = screenDetail
-			m.detail = demoDetail()
+		{"03_no_device", func(m *Model) {
+			m.devices = nil
+			m.detail = nil
+			m.scanErr = "蓝牙适配器未响应"
 		}},
-		{"05_firmwares", func(m *Model) {
-			m.page = screenFirmwares
-			m.firmwares = demoFirmwares()
-		}},
-		{"06_languages", func(m *Model) {
-			m.page = screenLanguages
-			m.pendingFw = core.FirmwareInfo{
-				Name:      "Thunderstrike_0x0112_locale.blkz",
-				Version:   "1.18",
-				IsLocale:  true,
-				Languages: []string{"en_us", "zh_cn", "ja_jp"},
-			}
-		}},
-		{"07_flashing", func(m *Model) {
-			m.page = screenFlashing
+		{"04_flashing", func(m *Model) {
+			m.flashing = true
 			m.steps = core.NewFlashSteps()
 			m.steps[0].Done = true
 			m.steps[1].Done = true
 			m.curStep = 3
-			m.flashing = true
-			m.pendingFw = demoFirmwares()[1]
 			m.prog = core.FlashProgressInfo{
 				BytesWritten: 122_880,
 				TotalBytes:   322_560,
 				Percent:      38,
 			}
 		}},
-		{"08_flash_done", func(m *Model) {
-			m.page = screenFlashing
+		{"05_done", func(m *Model) {
+			m.fwIdx = 1
 			m.steps = core.NewFlashSteps()
 			for i := range m.steps {
 				m.steps[i].Done = true
 			}
 			m.curStep = len(m.steps) + 1
-			m.pendingFw = demoFirmwares()[1]
 			m.prog = core.FlashProgressInfo{
 				BytesWritten: 322_560,
 				TotalBytes:   322_560,
@@ -248,28 +194,60 @@ func TestSnapshots(t *testing.T) {
 				BytesWrit: 322_560,
 				FromVer:   "1.33",
 				ToVer:     "1.18",
-				LogPath:   "Release/logs/flash_20261028_1204.log",
 			}
 		}},
-		{"09_flash_failed", func(m *Model) {
-			m.page = screenFlashing
+		{"06_failed", func(m *Model) {
+			m.flashing = false
 			m.steps = core.NewFlashSteps()
 			m.steps[0].Done = true
 			m.steps[1].Done = true
 			m.curStep = 3
-			m.pendingFw = demoFirmwares()[1]
 			m.result = &core.FlashResultInfo{
 				Success: false,
 				Error:   "写入手柄超时：WRITE_SQIF 未收到 ACK（40s）",
 			}
 		}},
+		{"07_locale", func(m *Model) {
+			m.fwIdx = 2 // 多语言固件，操作区应出现语言下拉
+			m.langIdx = 1
+		}},
+		{"08_no_device_clean", func(m *Model) {
+			m.devices = nil
+			m.detail = nil
+		}},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newBaseModel()
+			m := newTestModel()
 			tc.setup(m)
 			snapshot(t, tc.name, m)
 		})
+	}
+}
+
+// TestClickSelectsFirmware 验证点击固件行会切换选中项。
+func TestClickSelectsFirmware(t *testing.T) {
+	m := newTestModel()
+	tester := ui.NewTester(m.View, 708, 562)
+	tester.Frame()
+
+	// 固件列表第三行（行高 44，首行从 y≈173 开始）
+	tester.ClickAt(300, 283)
+	tester.Frame()
+
+	if m.fwIdx != 2 {
+		t.Fatalf("应选中第 3 个固件，实际 fwIdx=%d", m.fwIdx)
+	}
+}
+
+// TestMoveFirmwareSkipsBroken 验证键盘移动会跳过校验失败的固件。
+func TestMoveFirmwareSkipsBroken(t *testing.T) {
+	m := newTestModel()
+	m.fwIdx = 2 // 多语言固件，下一个是 MD5 不符
+
+	m.moveFirmware(1)
+	if m.fwIdx != 0 {
+		t.Fatalf("应跳过校验失败项回到第 1 个，实际 fwIdx=%d", m.fwIdx)
 	}
 }

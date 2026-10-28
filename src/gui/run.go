@@ -14,47 +14,28 @@ import (
 // appVersion 显示在页头的版本号。
 const appVersion = "V0.4"
 
-// screen 表示当前显示的页面。
-type screen int
-
-const (
-	screenScanning  screen = iota // 首次扫描中
-	screenDevices                 // 设备列表
-	screenDetail                  // 设备信息
-	screenFirmwares               // 固件列表
-	screenLanguages               // 多语言固件语言选择
-	screenFlashing                // 刷写进度与结果
-)
-
-// Model 是 GUI 的全部界面状态。
-//
-// 所有字段只在主线程读写：View 函数、控件回调，以及后台任务通过
-// Window.Update 投递的回调。后台 goroutine 不直接改这些字段。
+// Model 是界面的全部状态。单页布局，没有页面栈：
+// 设备、固件、刷写进度同时可见。
 type Model struct {
 	svc core.Services
 	win *mygo.Window
 
-	page screen
-	// 设备扫描
+	// 设备
 	devices  []core.DeviceInfo
 	devIdx   int
 	scanning bool
 	scanErr  string
 
-	// 选中设备与 HID 详情
-	selected      core.DeviceInfo
+	// 选中设备的 HID 详情
 	detail        *core.DeviceDetail
 	detailLoading bool
 
-	// 固件列表
+	// 固件
 	firmwares []core.FirmwareInfo
 	fwIdx     int
+	langIdx   int // 多语言固件选中的子包索引
 	fwLoading bool
 	fwErr     string
-
-	// 语言选择
-	langIdx   int
-	pendingFw core.FirmwareInfo
 
 	// 刷写
 	steps    []core.FlashStep
@@ -63,31 +44,28 @@ type Model struct {
 	flashing bool
 	result   *core.FlashResultInfo
 
-	// 手柄输入指示器
-	padReady  bool // HID 句柄已打开（设备在线）
-	padActive bool // 最近 400ms 内有输入
-	padHeard  bool // 本次运行是否收到过任何手柄输入
+	// 手柄输入指示
+	padReady  bool
+	padActive bool
 	padShown  atomic.Bool
 	padLastNs atomic.Int64
 }
 
-// Run 创建主窗口并运行 GUI，直到用户关闭窗口。
+// Run 创建窗口并运行 GUI，直到用户关闭窗口。
 func Run(svc core.Services) error {
-	m := &Model{svc: svc, page: screenScanning}
+	m := &Model{svc: svc}
 
 	mygo.App.WhenReady(func() {
 		m.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:           "Thunderstrike Controller Tool",
-			Width:           780,
-			Height:          440,
-			MinWidth:        700,
-			MinHeight:       400,
-			BackgroundColor: "#0F0F0F",
-			// 自绘标题栏：系统标题栏是浅色的，与深色界面割裂；
-			// 隐藏后窗口控件浮在右上角，页头让出对应宽度。
+			Width:           720,
+			Height:          570,
+			MinWidth:        620,
+			MinHeight:       500,
+			BackgroundColor: "#FFFFFF",
+			// 自绘标题栏：系统标题栏是浅灰的，与白底界面割裂
 			TitleBarStyle:  mygo.TitleBarHidden,
-			TitleBarHeight: int(headerHeight),
-			StateKey:       "main",
+			TitleBarHeight: headerHeight,
 			Content:        ui.View(m.View),
 		})
 		m.start()
@@ -97,72 +75,56 @@ func Run(svc core.Services) error {
 		return err
 	}
 
-	// 窗口已关闭，停止后台监听
 	if svc.Monitor != nil {
 		svc.Monitor.StopMonitoring()
 	}
 	return nil
 }
 
-// post 把 fn 投递到主线程执行并重绘。窗口尚未建立（如单元测试）时直接执行。
+// post 把 fn 投递到主线程执行并重绘。窗口未建立（单元测试）时直接执行。
 func (m *Model) post(fn func()) {
 	if m.win == nil {
 		fn()
 		return
 	}
-	// 窗口可能在监听 goroutine 回调前已关闭，此时 Update 会失败，忽略即可。
 	defer func() { _ = recover() }()
 	m.win.Update(fn)
 }
 
-// start 在窗口建立后启动手柄监听与首次设备扫描。
+// start 在窗口建立后启动手柄监听与首次扫描。
 func (m *Model) start() {
 	if m.svc.Monitor != nil {
 		m.svc.Monitor.StartMonitoring(m.onGamepadInput, m.onGamepadReady)
 	}
-	m.refreshDevices()
+	m.refreshAll()
 }
 
-// View 构建整窗界面：页头 + 页面内容 + 底部操作栏。
+// View 构建整窗界面：页头 + 设备区 + 固件区 + 底部操作区。
 func (m *Model) View(c *ui.Context) {
 	c.SetTheme(buildTheme())
-	theme := c.Theme()
-
-	// 先处理键盘，再按新状态构建本帧。
 	m.handleKeys(c)
 
-	// 显式给出根尺寸：内部大量 FillWidth / Grow 依赖确定的父级宽度。
-	w, h := c.Size()
-	ui.Column(c).Width(w).Height(h).Background(theme.Background).Children(func() {
-		m.header(c)
+	sw, sh := c.Size()
+	bodyH := sh - headerHeight - actionHeight - footerHeight - 2
 
-		ui.Box(c).Grow(1).FillWidth().Children(func() {
-			ui.Scroll(c).Fill().Padding(contentPadding, 16).Children(func() {
-				switch m.page {
-				case screenScanning, screenDevices:
-					m.viewDevices(c)
-				case screenDetail:
-					m.viewDetail(c)
-				case screenFirmwares:
-					m.viewFirmwares(c)
-				case screenLanguages:
-					m.viewLanguages(c)
-				case screenFlashing:
-					m.viewFlash(c)
-				}
-			})
+	ui.Column(c).Width(sw).Height(sh).Background(colorBg).Children(func() {
+		m.headerBar(c)
+
+		ui.Box(c).Width(sw).Height(bodyH).Children(func() {
+			m.deviceBlock(c)
+			m.firmwareBlock(c)
 		})
 
-		m.footer(c)
+		m.actionBlock(c)
+		m.statusBar(c)
 	})
 }
 
-// header 渲染页头：斜切品牌标识、名称、手柄状态与版本。
-// 窗口用自绘标题栏，控件浮在右上角，这里同时承担拖拽区职责。
-func (m *Model) header(c *ui.Context) {
+// headerBar 渲染页头：品牌、手柄状态与版本。
+func (m *Model) headerBar(c *ui.Context) {
 	tb := c.TitleBar()
 
-	row := ui.Row(c).FillWidth().Height(headerHeight).Padding(0, 16).Gap(10).
+	row := ui.Row(c).FillWidth().Height(headerHeight).Padding(0, pagePadding).Gap(8).
 		AlignItems(ui.Center)
 	if tb.Right > 0 {
 		row.PaddingEnd(tb.Right + 8)
@@ -170,23 +132,22 @@ func (m *Model) header(c *ui.Context) {
 	row.DragWindow()
 
 	row.Children(func() {
-		brandMark(c, 15)
-
-		ui.Text(c, "THUNDERSTRIKE").FontSize(12).Bold().
-			LetterSpacing(1.4).TextColor(colorText)
-		ui.Text(c, "SHIELD TV 2017").FontSize(11).TextColor(colorTextFaint)
+		ui.Box(c).Size(8, 8).Background(colorBrand)
+		ui.Text(c, "THUNDERSTRIKE").FontSize(11).Bold().
+			LetterSpacing(1.6).TextColor(colorText)
+		ui.Text(c, "SHIELD TV 2017").FontSize(10).TextColor(colorTextFaint)
 
 		ui.Spacer(c)
 
-		m.padIndicator(c)
-		ui.Text(c, appVersion).FontSize(11).TextColor(colorTextFaint)
+		m.padDot(c)
+		ui.Text(c, appVersion).FontSize(10).TextColor(colorTextFaint)
 	})
 
-	hairlineBrand(c)
+	hairline(c)
 }
 
-// padIndicator 渲染手柄指示器：未就绪为暗点，就绪为深绿，收到输入时亮绿。
-func (m *Model) padIndicator(c *ui.Context) {
+// padDot 渲染手柄连接状态：等待 / 就绪 / 有输入。
+func (m *Model) padDot(c *ui.Context) {
 	dot := colorTextFaint
 	text := "等待手柄"
 	switch {
@@ -198,73 +159,24 @@ func (m *Model) padIndicator(c *ui.Context) {
 		text = "手柄就绪"
 	}
 
-	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
 		ui.Box(c).Size(6, 6).Radius(3).Background(dot)
-		ui.Text(c, text).FontSize(11).TextColor(colorTextMuted)
+		ui.Text(c, text).FontSize(10).TextColor(colorTextMuted)
 	})
 }
 
-// footer 渲染底部状态条。主要操作放在页面标题行，这里只留刷写完成后的返回。
-func (m *Model) footer(c *ui.Context) {
-	var trailing func()
-	if m.page == screenFlashing && m.result != nil {
-		trailing = func() {
-			if ui.PrimaryButton(c, "返回设备列表").Clicked() {
-				m.resetToDevices()
-			}
-		}
-	}
+// --- 数据加载 ---
 
-	footerBar(c, m.statusText(), m.hintText(), trailing)
+// refreshAll 同时刷新设备与固件列表。
+func (m *Model) refreshAll() {
+	m.refreshDevices()
+	m.loadFirmwares()
 }
 
-// statusText 返回底部状态栏文案。
-func (m *Model) statusText() string {
-	text := m.pageStatus()
-	if m.padHeard {
-		text += "  ·  已收到手柄输入"
-	}
-	return text
-}
-
-// pageStatus 返回当前页面的基础状态文案。
-func (m *Model) pageStatus() string {
-	switch m.page {
-	case screenScanning:
-		return "正在扫描蓝牙 SPP 设备…"
-	case screenDevices:
-		if m.scanning {
-			return "正在扫描蓝牙 SPP 设备…"
-		}
-		return fmt.Sprintf("共 %d 个蓝牙设备", len(m.devices))
-	case screenDetail:
-		if m.detailLoading {
-			return "正在通过 HID 读取设备信息…"
-		}
-		return "设备： " + m.selected.DeviceName
-	case screenFirmwares:
-		if m.fwLoading {
-			return "正在扫描 blkz 固件目录…"
-		}
-		return fmt.Sprintf("共 %d 个固件包", len(m.firmwares))
-	case screenLanguages:
-		return "请选择要刷写的语言版本"
-	case screenFlashing:
-		if m.result != nil {
-			return "刷写流程已结束"
-		}
-		return "刷写中，请勿操作手柄"
-	}
-	return ""
-}
-
-// --- 业务流程 ---
-
-// refreshDevices 在后台扫描蓝牙设备，完成后回到主线程更新界面。
+// refreshDevices 后台扫描蓝牙设备，选中第一台并读取详情。
 func (m *Model) refreshDevices() {
 	m.scanning = true
 	m.scanErr = ""
-	m.page = screenScanning
 
 	go func() {
 		devices, err := m.svc.Scanner.ScanDevices()
@@ -273,39 +185,30 @@ func (m *Model) refreshDevices() {
 			if err != nil {
 				m.scanErr = err.Error()
 				m.devices = nil
-				m.page = screenDevices
 				return
 			}
-
 			m.devices = devices
-			if m.devIdx >= len(devices) {
-				m.devIdx = 0
-			}
-
-			// 只有一台手柄时跳过列表页，直接进设备信息
-			if len(devices) == 1 {
-				m.openDevice(devices[0])
-				return
-			}
-
-			m.page = screenDevices
+			m.devIdx = 0
+			m.detail = nil
+			m.refreshDetail()
 		})
 	}()
 }
 
-// openDevice 读取选中设备的 HID 详情并进入设备信息页。
-func (m *Model) openDevice(d core.DeviceInfo) {
-	m.selected = d
-	m.detail = nil
+// refreshDetail 读取当前选中设备的 HID 详情（版本、电量、序列号）。
+func (m *Model) refreshDetail() {
+	if len(m.devices) == 0 {
+		return
+	}
+	dev := m.devices[m.devIdx]
 	m.detailLoading = true
-	m.page = screenDetail
 
 	go func() {
-		detail, err := m.svc.Scanner.QueryDeviceDetail(d)
+		detail, err := m.svc.Scanner.QueryDeviceDetail(dev)
 		m.post(func() {
 			m.detailLoading = false
 			if err != nil {
-				m.detail = &core.DeviceDetail{DeviceName: d.DeviceName, MAC: d.MAC}
+				m.detail = &core.DeviceDetail{DeviceName: dev.DeviceName, MAC: dev.MAC}
 				return
 			}
 			m.detail = detail
@@ -313,12 +216,10 @@ func (m *Model) openDevice(d core.DeviceInfo) {
 	}()
 }
 
-// openFirmwares 扫描固件目录并进入固件列表页。
-func (m *Model) openFirmwares() {
-	m.page = screenFirmwares
+// loadFirmwares 后台扫描固件目录。
+func (m *Model) loadFirmwares() {
 	m.fwLoading = true
 	m.fwErr = ""
-	m.firmwares = nil
 
 	go func() {
 		list, err := m.svc.Firmwares.ScanFirmwares()
@@ -326,69 +227,66 @@ func (m *Model) openFirmwares() {
 			m.fwLoading = false
 			if err != nil {
 				m.fwErr = err.Error()
+				m.firmwares = nil
 				return
 			}
 			m.firmwares = list
 			if m.fwIdx >= len(list) {
 				m.fwIdx = 0
+				m.langIdx = 0
 			}
 		})
 	}()
 }
 
-// chooseFirmware 处理固件选择：多语言固件先选语言，其余直接开刷。
-func (m *Model) chooseFirmware(fw core.FirmwareInfo) {
-	if fw.IsLocale && len(fw.Languages) > 1 {
-		m.pendingFw = fw
-		m.langIdx = 0
-		m.page = screenLanguages
+// --- 刷写 ---
+
+// selectedFirmware 返回当前选中的固件，没有则返回 nil。
+func (m *Model) selectedFirmware() *core.FirmwareInfo {
+	if m.fwIdx < 0 || m.fwIdx >= len(m.firmwares) {
+		return nil
+	}
+	return &m.firmwares[m.fwIdx]
+}
+
+// selectedDevice 返回当前选中设备，没有则返回 nil。
+func (m *Model) selectedDevice() *core.DeviceInfo {
+	if m.devIdx < 0 || m.devIdx >= len(m.devices) {
+		return nil
+	}
+	return &m.devices[m.devIdx]
+}
+
+// canFlash 报告当前是否允许开始刷写。
+func (m *Model) canFlash() bool {
+	fw := m.selectedFirmware()
+	if fw == nil || m.selectedDevice() == nil || m.flashing {
+		return false
+	}
+	// 校验不通过的固件禁止刷写
+	return fw.Checksum != "mismatch" && fw.Checksum != "error"
+}
+
+// startFlash 在后台执行刷写，进度通过回调投递回主线程。
+func (m *Model) startFlash() {
+	dev := m.selectedDevice()
+	fw := m.selectedFirmware()
+	if dev == nil || fw == nil || m.flashing {
 		return
 	}
-	m.startFlash(fw)
-}
 
-// chooseLanguage 选定语言版本后开始刷写。
-func (m *Model) chooseLanguage(i int) {
-	fw := m.pendingFw
-	fw.LanguageIndex = i
-	m.startFlash(fw)
-}
-
-// startFlash 在后台执行刷写，通过回调把进度投递回主线程。
-func (m *Model) startFlash(fw core.FirmwareInfo) {
-	m.pendingFw = fw
+	target := *fw
+	target.LanguageIndex = m.langIdx
 	m.steps = core.NewFlashSteps()
 	m.curStep = 0
 	m.prog = core.FlashProgressInfo{}
 	m.result = nil
 	m.flashing = true
-	m.page = screenFlashing
 
-	device := m.selected
 	var lastPush atomic.Int64
 
-	// 进度回调可能非常密集（每 1KB 一次），节流到约 25 次/秒。
-	pushProgress := func(written, total int) {
-		now := time.Now().UnixNano()
-		if written < total && now-lastPush.Load() < int64(40*time.Millisecond) {
-			return
-		}
-		lastPush.Store(now)
-		pct := 0
-		if total > 0 {
-			pct = written * 100 / total
-		}
-		m.post(func() {
-			m.prog = core.FlashProgressInfo{
-				BytesWritten: written,
-				TotalBytes:   total,
-				Percent:      pct,
-			}
-		})
-	}
-
 	go func() {
-		result, err := m.svc.Flasher.ExecuteFlash(device, fw,
+		result, err := m.svc.Flasher.ExecuteFlash(*dev, target,
 			func(step, total int, name string) {
 				m.post(func() {
 					m.curStep = step
@@ -397,7 +295,25 @@ func (m *Model) startFlash(fw core.FirmwareInfo) {
 					}
 				})
 			},
-			pushProgress,
+			func(written, total int) {
+				// 每 1KB 回调一次，节流到约 25 次/秒
+				now := time.Now().UnixNano()
+				if written < total && now-lastPush.Load() < int64(40*time.Millisecond) {
+					return
+				}
+				lastPush.Store(now)
+				pct := 0
+				if total > 0 {
+					pct = written * 100 / total
+				}
+				m.post(func() {
+					m.prog = core.FlashProgressInfo{
+						BytesWritten: written,
+						TotalBytes:   total,
+						Percent:      pct,
+					}
+				})
+			},
 		)
 
 		m.post(func() {
@@ -425,12 +341,26 @@ func (m *Model) startFlash(fw core.FirmwareInfo) {
 	}()
 }
 
-// resetToDevices 回到设备列表并重新扫描。
-func (m *Model) resetToDevices() {
-	m.result = nil
-	m.detail = nil
-	m.devIdx = 0
-	m.refreshDevices()
+// currentStepName 返回当前正在执行的步骤名。
+func (m *Model) currentStepName() string {
+	if m.curStep >= 1 && m.curStep <= len(m.steps) {
+		return m.steps[m.curStep-1].Name
+	}
+	return ""
+}
+
+// statusText 返回底部状态文案。
+func (m *Model) statusText() string {
+	switch {
+	case m.scanning:
+		return "正在扫描设备…"
+	case m.scanErr != "":
+		return "扫描失败：" + m.scanErr
+	case len(m.devices) == 0:
+		return "未发现手柄，请确认已开机并配对"
+	}
+	return fmt.Sprintf("%s  ·  %s", orDash(m.selectedDevice().DeviceName),
+		orDash(m.selectedDevice().Port))
 }
 
 // --- 手柄输入指示 ---
@@ -441,26 +371,23 @@ func (m *Model) onGamepadReady() {
 }
 
 // onGamepadInput 由 HID 监听在后台 goroutine 中调用。
-//
-// 只有「待机 → 活动」或「活动 → 待机」的状态切换才触发重绘，
-// 避免摇杆连续输入导致的高频重绘。
+// 只在状态切换时重绘，避免摇杆连续输入导致高频刷新。
 func (m *Model) onGamepadInput() {
 	m.padLastNs.Store(time.Now().UnixNano())
 
 	if m.padShown.CompareAndSwap(false, true) {
 		m.post(func() {
 			m.padActive = true
-			m.padHeard = true
+			m.padReady = true
 		})
 		time.AfterFunc(400*time.Millisecond, m.padCooldown)
 	}
 }
 
-// padCooldown 在输入停止后把指示器切回待机。
+// padCooldown 在输入停止后把指示器切回就绪。
 func (m *Model) padCooldown() {
 	last := time.Unix(0, m.padLastNs.Load())
 	if time.Since(last) < 400*time.Millisecond {
-		// 仍有输入，稍后再检查
 		time.AfterFunc(200*time.Millisecond, m.padCooldown)
 		return
 	}

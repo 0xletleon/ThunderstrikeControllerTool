@@ -5,6 +5,11 @@
 // 使两套界面互不依赖，也不会与业务层形成循环依赖。
 package core
 
+import (
+	"fmt"
+	"strings"
+)
+
 // DeviceInfo 表示扫描发现的蓝牙设备。
 type DeviceInfo struct {
 	Index      int    // 序号
@@ -119,6 +124,29 @@ var languageNames = map[string]string{
 	"nb_no": "Norsk (挪威语)",
 }
 
+// languageBase 是语言前缀到中文名的映射，用于覆盖 languageNames 未收录的变体，
+// 比如 en_au、es_us 这类只能靠前缀识别的代码。
+var languageBase = map[string]string{
+	"en": "英语", "de": "德语", "fr": "法语", "es": "西班牙语",
+	"it": "意大利语", "pt": "葡萄牙语", "nl": "荷兰语", "pl": "波兰语",
+	"ru": "俄语", "ja": "日语", "ko": "韩语", "zh": "中文",
+	"tr": "土耳其语", "sv": "瑞典语", "da": "丹麦语", "fi": "芬兰语",
+	"nb": "挪威语", "no": "挪威语", "cs": "捷克语", "hu": "匈牙利语",
+	"el": "希腊语", "ar": "阿拉伯语", "he": "希伯来语", "th": "泰语",
+	"vi": "越南语", "id": "印尼语", "ms": "马来语", "uk": "乌克兰语",
+	"ro": "罗马尼亚语", "bg": "保加利亚语", "hr": "克罗地亚语",
+	"sk": "斯洛伐克语", "sl": "斯洛文尼亚语", "et": "爱沙尼亚语",
+	"lv": "拉脱维亚语", "lt": "立陶宛语",
+}
+
+// regionHint 把地区后缀翻成中文简称。
+var regionHint = map[string]string{
+	"us": "美国", "gb": "英国", "au": "澳大利亚", "ca": "加拿大",
+	"ie": "爱尔兰", "cn": "简体", "tw": "繁体", "hk": "香港",
+	"jp": "日本", "kr": "韩国", "br": "巴西", "pt": "葡萄牙",
+	"mx": "墨西哥", "ar": "阿根廷", "at": "奥地利", "ch": "瑞士",
+}
+
 // LanguageDisplayName 将固件语言代码转为可读的显示名称。
 func LanguageDisplayName(code string) string {
 	if name, ok := languageNames[code]; ok {
@@ -126,6 +154,18 @@ func LanguageDisplayName(code string) string {
 	}
 	if code == "" {
 		return "默认 (Standard)"
+	}
+
+	// 回退：按 语言_地区 拆开，至少让用户看懂是什么语言
+	lang, region, found := strings.Cut(code, "_")
+	if base, ok := languageBase[lang]; ok {
+		if !found || region == "" {
+			return base + "（默认）"
+		}
+		if hint, ok := regionHint[region]; ok {
+			return fmt.Sprintf("%s（%s）", base, hint)
+		}
+		return fmt.Sprintf("%s（%s）", base, strings.ToUpper(region))
 	}
 	return code
 }

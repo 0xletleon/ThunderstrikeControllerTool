@@ -1,0 +1,417 @@
+package gui
+
+import (
+	"fmt"
+
+	"github.com/egoist/mygo/ui"
+
+	"thunderstrike-controller-tool/src/core"
+)
+
+// deviceBlockH 设备信息区固定高度。
+const deviceBlockH = 92
+
+// deviceBlock 渲染设备区：名称、固件版本、电量、端口。
+func (m *Model) deviceBlock(c *ui.Context) {
+	ui.Box(c).FillWidth().Height(deviceBlockH).Padding(10, pagePadding).
+		Children(func() {
+			if m.scanning {
+				m.blockHint(c, "正在扫描蓝牙设备…", true)
+				return
+			}
+			dev := m.selectedDevice()
+			if dev == nil {
+				m.deviceEmpty(c)
+				return
+			}
+
+			d := m.detail
+			if d == nil {
+				d = &core.DeviceDetail{DeviceName: dev.DeviceName, MAC: dev.MAC}
+			}
+
+			ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Start).Children(func() {
+				ui.Column(c).Grow(1).Gap(6).Children(func() {
+					// 名称 + 状态
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, dev.DeviceName).FontSize(15).Bold().
+							TextColor(colorText)
+						if dev.Online() {
+							chip(c, "在线", colorBrandDark)
+						} else {
+							chip(c, "休眠", colorTextMuted)
+						}
+					})
+
+					// 两个读数：固件版本、电量
+					ui.Row(c).FillWidth().Gap(28).AlignItems(ui.End).Children(func() {
+						ui.Column(c).Gap(2).Children(func() {
+							ui.Text(c, "固件版本").FontSize(10).TextColor(colorTextFaint)
+							ui.Text(c, "V"+orDash(d.FwVersion)).FontSize(20).Bold().
+								TextColor(colorText)
+						})
+
+						ui.Column(c).Grow(1).Gap(2).Children(func() {
+							ui.Text(c, "电量").FontSize(10).TextColor(colorTextFaint)
+							if d.BatteryPct > 0 {
+								ui.Row(c).FillWidth().Gap(10).AlignItems(ui.End).
+									Children(func() {
+										ui.Text(c, fmt.Sprintf("%d", d.BatteryPct)).
+											FontSize(20).Bold().
+											TextColor(batteryColor(d.BatteryPct))
+										ui.Text(c, "%").FontSize(10).
+											TextColor(colorTextMuted).Padding(0, 0, 3, 0)
+										// 电量条限宽：否则会一路拉到窗口右边缘，与读数脱节
+										ui.Box(c).Width(150).Padding(0, 0, 0, 6).
+											Children(func() {
+												bar(c, float32(d.BatteryPct)/100,
+													batteryColor(d.BatteryPct))
+											})
+									})
+							} else {
+								ui.Text(c, m.batteryFallback()).FontSize(14).
+									TextColor(colorTextFaint)
+							}
+						})
+					})
+				})
+
+				// 右侧：端口与 MAC
+				ui.Column(c).Gap(4).AlignItems(ui.End).Children(func() {
+					ui.Text(c, orDash(dev.Port)).FontSize(12).TextColor(colorText)
+					ui.Text(c, orDash(d.MacHID)).FontSize(10).TextColor(colorTextFaint)
+				})
+			})
+		})
+
+	hairline(c)
+}
+
+// batteryFallback 在电量读不到时给出原因提示。
+func (m *Model) batteryFallback() string {
+	if m.detailLoading {
+		return "读取中…"
+	}
+	return "未能读取"
+}
+
+// deviceEmpty 渲染未检测到设备时的引导：给出可执行的步骤，而不只是一句提示。
+func (m *Model) deviceEmpty(c *ui.Context) {
+	ui.Row(c).FillWidth().Gap(20).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).Gap(3).Children(func() {
+			ui.Row(c).Gap(7).AlignItems(ui.Center).Children(func() {
+				ui.Box(c).Size(5, 5).Radius(2.5).Background(colorText)
+				ui.Text(c, "未检测到 Thunderstrike 手柄").
+					FontSize(14).Bold().TextColor(colorText)
+			})
+
+			if m.scanErr != "" {
+				ui.Text(c, "扫描出错："+m.scanErr).FontSize(11).
+					TextColor(colorTextMuted).Wrap()
+				return
+			}
+
+			ui.Text(c, "① 长按手柄上的电源键开机（指示灯闪烁）").
+				FontSize(11).TextColor(colorTextMuted)
+			ui.Text(c, "② 在 Windows 设置 → 蓝牙和其他设备 中完成配对").
+				FontSize(11).TextColor(colorTextMuted)
+			ui.Text(c, "③ 回到这里点击右侧「重新扫描设备」").
+				FontSize(11).TextColor(colorTextMuted)
+		})
+
+		if ui.Button(c, "重新扫描设备").Clicked() {
+			m.refreshAll()
+		}
+	})
+}
+
+// blockHint 渲染区块内的提示文案。
+func (m *Model) blockHint(c *ui.Context, text string, busy bool) {
+	ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+		if busy {
+			ui.Spinner(c)
+		}
+		ui.Text(c, text).FontSize(12).TextColor(colorTextMuted)
+	})
+}
+
+// firmwareBlock 渲染固件列表区。
+func (m *Model) firmwareBlock(c *ui.Context) {
+	ui.Row(c).FillWidth().Padding(8, pagePadding).Gap(8).
+		AlignItems(ui.Center).
+		Children(func() {
+			ui.Text(c, "固件").FontSize(10).TextColor(colorTextFaint).
+				LetterSpacing(0.8)
+			if n := len(m.firmwares); n > 0 {
+				ui.Text(c, fmt.Sprintf("%d 个", n)).FontSize(10).
+					TextColor(colorTextFaint)
+			}
+			ui.Spacer(c)
+			if ui.Button(c, "重新扫描").Clicked() {
+				m.loadFirmwares()
+			}
+		})
+
+	if m.fwLoading || len(m.firmwares) == 0 {
+		ui.Box(c).FillWidth().Padding(24, pagePadding).Children(func() {
+			m.blockHint(c, m.firmwaresEmptyText(), m.fwLoading)
+		})
+		return
+	}
+
+	// 内容自然流：不用固定高度/裁切，避免 mygo 的 flex 尺寸计算偏差
+	ui.Box(c).FillWidth().Children(func() {
+		for i := range m.firmwares {
+			m.firmwareRow(c, i)
+		}
+	})
+}
+
+// firmwaresEmptyText 返回固件列表为空时的提示。
+func (m *Model) firmwaresEmptyText() string {
+	if m.fwErr != "" {
+		return "读取固件目录失败：" + m.fwErr
+	}
+	if m.fwLoading {
+		return "正在扫描 blkz 目录…"
+	}
+	return "blkz/ 目录里没有固件包"
+}
+
+// firmwareRow 渲染单行固件。校验不通过的不可选。
+func (m *Model) firmwareRow(c *ui.Context, i int) {
+	fw := m.firmwares[i]
+	blocked := fw.Checksum == "mismatch" || fw.Checksum == "error"
+	selected := i == m.fwIdx && !blocked
+
+	row := ui.Row(c).FillWidth().Height(34).Padding(0, pagePadding).Gap(12).
+		AlignItems(ui.Center).Background(colorBg)
+
+	switch {
+	case selected:
+		row.Background(colorBrandTint)
+	case blocked:
+		// 校验失败的固件不给 hover 反馈
+	case row.Hovered():
+		row.Background(colorPanel)
+	}
+
+	if !blocked {
+		row.OnClick(func() {
+			m.fwIdx = i
+			m.langIdx = 0
+			m.result = nil
+		})
+	}
+
+	row.Children(func() {
+		// 选中提示条
+		accent := colorBg
+		if selected {
+			accent = colorBrand
+		}
+		ui.Box(c).Width(2).Height(16).Background(accent)
+
+		ui.Text(c, "V"+fw.Version).FontSize(13).Bold().
+			TextColor(colorText).Width(52)
+
+		ui.Text(c, fw.Name).FontSize(11).TextColor(colorTextMuted).
+			Width(300).NoWrap().Ellipsis("…")
+
+		ui.Spacer(c)
+		switch fw.Checksum {
+		case "match":
+			chip(c, "校验通过", colorBrandDark)
+		case "mismatch":
+			chip(c, "MD5 不符", colorText)
+		case "unknown":
+			chip(c, "未收录", colorTextMuted)
+		case "error":
+			chip(c, "校验出错", colorText)
+		default:
+			chip(c, "未知", colorTextFaint)
+		}
+
+		if fw.IsLocale && len(fw.Languages) > 0 {
+			chip(c, fmt.Sprintf("%d 语言", len(fw.Languages)), colorTextMuted)
+		}
+	})
+}
+
+// actionBlock 渲染底部操作区：待刷版本、进度与刷写按钮。
+func (m *Model) actionBlock(c *ui.Context) {
+	ui.Box(c).FillWidth().Height(actionHeight).Background(colorPanel).
+		Children(func() {
+			hairline(c)
+
+			ui.Row(c).FillWidth().Padding(10, pagePadding).Gap(18).
+				AlignItems(ui.Center).
+				Children(func() {
+					ui.Column(c).Grow(1).Gap(6).Children(func() {
+						m.actionHeadline(c)
+						m.actionProgress(c)
+					})
+
+					m.actionButton(c)
+				})
+		})
+}
+
+// actionHeadline 渲染操作区主文案。
+func (m *Model) actionHeadline(c *ui.Context) {
+	fw := m.selectedFirmware()
+	from := "—"
+	if d := m.detail; d != nil && d.FwVersion != "" {
+		from = "V" + d.FwVersion
+	}
+
+	switch {
+	case m.flashing:
+		if fw != nil {
+			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "正在刷写").FontSize(10).TextColor(colorTextFaint)
+				ui.Text(c, "V"+fw.Version).FontSize(16).Bold().TextColor(colorBrandDark)
+				ui.Text(c, fmt.Sprintf("%s → V%s", from, fw.Version)).
+					FontSize(10).TextColor(colorTextMuted)
+			})
+		}
+
+	case m.result != nil && m.result.Success:
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "✓").FontSize(12).Bold().TextColor(colorBrandDark)
+			ui.Text(c, fmt.Sprintf("刷写完成  %s → V%s", from, m.result.ToVer)).
+				FontSize(13).Bold().TextColor(colorBrandDark)
+			ui.Text(c, "耗时 "+m.result.Elapsed).FontSize(10).
+				TextColor(colorTextFaint)
+		})
+
+	case m.result != nil && !m.result.Success:
+		ui.Text(c, "✗ 刷写失败："+m.result.Error).FontSize(12).
+			TextColor(colorText).Wrap()
+
+	case fw != nil:
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "待刷写").FontSize(10).TextColor(colorTextFaint)
+			ui.Text(c, "V"+fw.Version).FontSize(16).Bold().TextColor(colorText)
+			ui.Text(c, fmt.Sprintf("%s → V%s", from, fw.Version)).
+				FontSize(10).TextColor(colorTextMuted)
+
+			// 多语言包：直接在这里选子包，不用另开一页
+			if names := m.languageNames(fw); len(names) > 0 {
+				m.languageSelect(c, names)
+			}
+		})
+
+	default:
+		ui.Text(c, "选择一个固件包开始刷写").FontSize(12).
+			TextColor(colorTextMuted)
+	}
+}
+
+// languageNames 返回多语言固件的子包显示名；非多语言返回 nil。
+func (m *Model) languageNames(fw *core.FirmwareInfo) []string {
+	if fw == nil || !fw.IsLocale || len(fw.Languages) < 2 {
+		return nil
+	}
+	names := make([]string, len(fw.Languages))
+	for i, code := range fw.Languages {
+		names[i] = core.LanguageDisplayName(code)
+	}
+	return names
+}
+
+// languageSelect 渲染子包（语言）选择下拉。
+func (m *Model) languageSelect(c *ui.Context, names []string) {
+	if m.langIdx <= 0 || m.langIdx >= len(names) {
+		m.langIdx = 0
+	}
+
+	current := names[m.langIdx]
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "语言").FontSize(10).TextColor(colorTextFaint)
+		if ui.Select(c, &current, names).Width(150).Changed() {
+			for i, n := range names {
+				if n == current {
+					m.langIdx = i
+					m.result = nil
+					break
+				}
+			}
+		}
+	})
+}
+
+// actionProgress 渲染操作区进度条（刷写中或完成后）。
+func (m *Model) actionProgress(c *ui.Context) {
+	if m.result == nil && !m.flashing {
+		return
+	}
+
+	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+		ui.Box(c).Grow(1).Children(func() {
+			bar(c, float32(m.prog.Ratio()), colorBrand)
+		})
+		ui.Text(c, fmt.Sprintf("%d%%", m.prog.Percent)).FontSize(10).
+			TextColor(colorTextMuted).Width(34)
+		if name := m.currentStepName(); name != "" && m.flashing {
+			ui.Text(c, name).FontSize(10).TextColor(colorTextFaint).Width(56)
+		}
+		if m.prog.TotalBytes > 0 {
+			ui.Text(c, fmt.Sprintf("%s / %s",
+				humanSize(m.prog.BytesWritten), humanSize(m.prog.TotalBytes))).
+				FontSize(10).TextColor(colorTextFaint)
+		}
+	})
+}
+
+// actionButton 渲染刷写按钮，按状态切换文案与可用性。
+func (m *Model) actionButton(c *ui.Context) {
+	switch {
+	case m.flashing:
+		ui.Button(c, "刷写中…").Disabled(true)
+
+	case m.result != nil && m.result.Success:
+		if ui.Button(c, "继续刷写").Clicked() {
+			m.result = nil
+		}
+
+	case m.result != nil && !m.result.Success:
+		if ui.PrimaryButton(c, "重试").Clicked() {
+			m.startFlash()
+		}
+
+	case !m.canFlash():
+		ui.PrimaryButton(c, "开始刷写").Disabled(true)
+
+	default:
+		if ui.PrimaryButton(c, "开始刷写").Clicked() {
+			m.startFlash()
+		}
+	}
+}
+
+// statusBar 渲染底部状态条：左侧运行状态，右侧快捷键提示。
+func (m *Model) statusBar(c *ui.Context) {
+	ui.Box(c).FillWidth().Height(footerHeight).Children(func() {
+		hairline(c)
+		ui.Row(c).FillWidth().Height(footerHeight-1).
+			Padding(0, pagePadding).Gap(10).AlignItems(ui.Center).
+			Children(func() {
+				ui.Text(c, m.statusText()).FontSize(10).TextColor(colorTextFaint)
+				ui.Spacer(c)
+				ui.Text(c, m.hintText()).FontSize(10).TextColor(colorTextFaint)
+			})
+	})
+}
+
+// humanSize 把字节数格式化为可读大小。
+func humanSize(n int) string {
+	switch {
+	case n <= 0:
+		return "—"
+	case n >= 1024*1024:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
+	default:
+		return fmt.Sprintf("%d KB", n/1024)
+	}
+}
