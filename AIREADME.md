@@ -228,41 +228,28 @@ nv-recovery-image-shield-2017-atv-9.2.1\vendor.ext4\oem\firmware\
 
 | 包 | 技术 | 说明 |
 |---|---|---|
-| `src/gui/` | MyGo 原生自绘 UI（`github.com/egoist/mygo v0.7.1`，版本锁定） | 窗口 780×440，深色单屏，页面状态机 + 5 个视图文件 |
+| `src/gui/` | MyGo 原生自绘 UI（`github.com/egoist/mygo v0.7.1`，版本锁定） | 窗口 760×528，单页白底，页面状态机 |
 
-- `src/core/` 定义 `DeviceScanner`、`FirmwareScanner`、`Flasher`、`GamepadMonitor` 四个接口与全部数据类型，`gui` 只依赖 `core`，不碰业务实现。
-- 业务实现集中在 `src/cmd/adapter.go`（界面适配器）与 `src/cmd/gamepad_monitor.go`。
+- `src/core/` 定义 `DeviceScanner`、`FirmwareScanner`、`Flasher` 三个接口与全部数据类型，`gui` 只依赖 `core`，不碰业务实现。
+- 业务实现集中在 `src/cmd/adapter.go`（界面适配器）。
 - 所有业务包位于 `src/` 下，main.go 留在仓库根目录（`build.bat` 依旧在根目录执行 `go build .`）。
 - **线程模型**：界面状态只在主线程读写。后台 goroutine（设备扫描、HID 查询、刷写回调）统一通过 `Model.post` → `mygo.Window.Update` 投递修改，禁止直接改字段；`post` 在窗口尚未建立时同步执行，便于单元测试。
 - **Go 版本**：mygo v0.7.1 要求 Go ≥ 1.27.3（`go.mod` 已声明）。低于该版本时 `GOTOOLCHAIN=auto` 会自动下载工具链，首次构建需要联网。
-- **DPI**：窗口尺寸按 DIP 计，实际物理像素 = 尺寸 × 系统缩放比例（本机 150% 时 780×440 约合 1170×660）；内容超出可视高度时由 `ui.Scroll` 滚动。
-- **布局要点**：`Spacer` 本身即吸收剩余空间，不要再叠加 `Grow`；根容器必须用 `c.Size()` 显式设置宽高，否则内部 `FillWidth` 缺少参照会导致横向溢出。
+- **DPI**：窗口尺寸按 DIP 计，实际物理像素 = 尺寸 × 系统缩放比例。
+- **布局要点**：`Spacer` 本身即吸收剩余空间，不要再叠加 `Grow`。
 
 ### 视觉规范
 
-对齐 NVIDIA 官方品牌（只有绿 `#76B900`、黑、白三色）：
+白底 + NVIDIA 绿色家族（官方主绿 `#76B900`，Pantone 376 C）：
 
-- **深色为唯一形态**，不跟随系统主题：背景 `#0F0F0F`、面板 `#171717`、描边 `#2A2A2A`。
-- **单一品牌绿**：强调、成功、在线、进度全部用 `#76B900`，不再另设成功色，避免一个绿兼五种语义。
-- **斜切是唯一的装饰语言**（NVIDIA 标识体系的倾斜感）：页头 logo 用 `Skew(-8, 0)`；纯色块可直接斜，带文字的容器需再 `Skew(+8, 0)` 抵消文字倾斜。**内置按钮不吃 Skew**，主按钮保持直角以保证键盘焦点与 hover 反馈。
-- **数字承载信息**：版本号 / 电量 32px，刷写百分比 56px，其余信息 10–12px 灰字。信息层级靠字号拉开，不靠颜色。
-- **自绘标题栏**：`TitleBarStyle: mygo.TitleBarHidden` + `TitleBarHeight = 48`。系统标题栏是浅色的，会与深色界面割裂；隐藏后页头用 `c.TitleBar().Right` 让出窗口控件宽度，并调用 `DragWindow()` 作为拖拽区。
-- **版式常量**：`headerHeight 48 / footerHeight 40 / contentPadding 14` 统一定义在 `theme.go`，视图计算可用高度时引用 `bodyHeight(c)`。
-- **交互简化**：只有一台手柄时扫描后直接进设备信息页，省掉列表这一屏；多设备才出列表。
-
-### 手柄输入监听
-
-`src/hid/input_monitor.go` 负责把「手柄被按了」变成界面反馈（右上角指示器 + 底部状态栏）。三个关键点：
-
-- 手柄注册了**两个** HID 集合（蓝牙 HID 服务路径 `hid#{00001124-...}` 与物理设备路径 `hid#vid_0955&pid_7214#...`，均 UsagePage=0x0001/Usage=0x0005，输入报告 233 字节）。按键上报可能落在任一个，所以 `findThunderstrikeHidPaths()` 返回全部路径，监听器为每个集合起一个阻塞读循环。
-- 每个句柄**阻塞读，不做超时取消**。早期实现每 500ms `CancelIoEx` 强杀句柄，导致手柄静止时一直在「打开-取消-断开-重连」循环，按键落在重连空窗期就丢。现在只有 `Close()` 才打断读。
-- 设备不在线时每 2 秒重试，手柄休眠或被刷写重启后无需重启程序；`onReady` 回调让界面区分「等待手柄 / 手柄就绪 / 手柄活动」三态。
-
-诊断命令：
-
-```
-go test ./src/hid -run TestListHidCollections -v   # 列出手柄所有 HID 集合
-```
+- **单页布局**：设备信息、固件列表、待刷写版本与进度、状态栏同屏，不做页面跳转。
+- **固定高度**：页头 40 / 设备区 136 / 列表标签 25 / 列表 216（6 行）/ 操作区 80 / 状态栏 30，常量集中在 `theme.go`。内容总高恒定，底部区域位置不会随固件数量跳动；固件超过 6 个时在列表区内滚动。
+- **白色背景 + 灰白分区**：`#FFFFFF` 页面、`#F7F9F3` 操作区、`#E5E8E0` 分隔线。
+- **强调色只用绿/黑/灰/白**：主绿做强调与进度，浅底上用深绿 `#5C9100` 做文字，危险/警告用黑色 + 粗体（不用红黄）。
+- **字号承载层级**：版本号与电量 20px，其余 10–12px 灰字。
+- **自绘标题栏**：`TitleBarStyle: mygo.TitleBarHidden` + `TitleBarHeight = 40`，页头用 `c.TitleBar().Right` 让出窗口控件宽度并调用 `DragWindow()`。
+- **版本号是链接**：页头右上角版本号点击打开 GitHub 仓库（`repoURL` 常量）。
+- **布局坑**：`Spacer` 会把右对齐元素推到看不见的地方，重要按钮要靠左或紧跟在文字后面；`Grow` / `Absolute` 在真机上不按预期分配高度，版式一律用固定高度。
 
 ### GUI 视图测试
 
@@ -298,12 +285,9 @@ ThunderstrikeControllerTool/
 │   │   ├── flash_core.go           # 刷写核心逻辑
 │   │   ├── bt_discovery_windows.go # WMI 查询蓝牙 SPP COM 口
 │   │   ├── helpers.go              # 辅助函数（HID 查询、序列号提取、电池查询）
-│   │   └── gamepad_monitor.go      # 手柄输入监听适配器
 │   ├── hid/                        # HID 协议
 │   │   ├── commands.go             # 159 个命令枚举 + 协议常量
 │   │   ├── windows_client.go       # Windows HID API 客户端 + BatteryInfo 解析
-│   │   ├── input_monitor.go        # HID 输入监听（多集合阻塞读 + 自动重连）
-│   │   ├── input_monitor_test.go   # 监听器就绪/关闭测试
 │   │   └── hid_probe_test.go       # 诊断：列出所有 HID 集合
 │   ├── spp/                        # 蓝牙 SPP 协议栈
 │   │   ├── protocol.go             # 命令码、状态码、超时、UpgradeTimings
