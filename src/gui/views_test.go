@@ -26,7 +26,7 @@ func snapshotDir() string {
 func snapshot(t *testing.T, name string, m *Model) {
 	t.Helper()
 
-	tester := ui.NewTester(m.View, 708, 562)
+	tester := ui.NewTester(m.View, 708, 622)
 	tester.Frame()
 
 	f, err := os.Create(filepath.Join(snapshotDir(), name+".png"))
@@ -238,7 +238,7 @@ func TestSnapshots(t *testing.T) {
 // 用文本定位而不是坐标：布局一调整坐标就失效。
 func TestClickSelectsFirmware(t *testing.T) {
 	m := newTestModel()
-	tester := ui.NewTester(m.View, 708, 562)
+	tester := ui.NewTester(m.View, 708, 622)
 	tester.Frame()
 
 	if err := tester.Click("Thunderstrike_locale_0x0121.blkz"); err != nil {

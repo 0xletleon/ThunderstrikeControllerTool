@@ -9,7 +9,7 @@ import (
 )
 
 // deviceBlockH 设备信息区固定高度。
-const deviceBlockH = 106
+const deviceBlockH = 124
 
 // deviceBlock 渲染设备区：名称、固件版本、电量、端口。
 func (m *Model) deviceBlock(c *ui.Context) {
@@ -30,11 +30,11 @@ func (m *Model) deviceBlock(c *ui.Context) {
 				d = &core.DeviceDetail{DeviceName: dev.DeviceName, MAC: dev.MAC}
 			}
 
-			// 纵向排列：名称 / 读数 / 端口与刷新。
-			// 不用左右分栏 —— 真机上 Grow 会把右栏压成 0 宽。
-			ui.Column(c).FillWidth().Gap(6).Children(func() {
-				// 名称 + 状态
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			// 纵向排列：标题行带刷新，下面依次是读数与端口。
+			ui.Column(c).FillWidth().Gap(8).Children(func() {
+				// 第 1 行：名称、状态与刷新。
+				// 刷新按钮紧跟在状态后面而不是推到右端：真机上右对齐按钮不渲染。
+				ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, dev.DeviceName).FontSize(15).Bold().
 						TextColor(colorText)
 					if dev.Online() {
@@ -42,9 +42,18 @@ func (m *Model) deviceBlock(c *ui.Context) {
 					} else {
 						chip(c, "休眠", colorTextMuted)
 					}
+
+					// 唯一的刷新入口：设备与固件一起刷
+					if m.scanning || m.detailLoading || m.fwLoading {
+						ui.Button(c, "刷新中…").Disabled(true)
+						return
+					}
+					if ui.Button(c, "刷新").Clicked() {
+						m.refreshAll()
+					}
 				})
 
-				// 两个读数：固件版本、电量
+				// 第 2 行：两个读数
 				ui.Row(c).Gap(36).AlignItems(ui.End).Children(func() {
 					ui.Column(c).Gap(2).Children(func() {
 						ui.Text(c, "固件版本").FontSize(10).TextColor(colorTextFaint)
@@ -61,7 +70,6 @@ func (m *Model) deviceBlock(c *ui.Context) {
 									TextColor(batteryColor(d.BatteryPct))
 								ui.Text(c, "%").FontSize(10).
 									TextColor(colorTextMuted).Padding(0, 0, 3, 0)
-								// 电量条限宽：否则会一路拉到窗口右边缘
 								ui.Box(c).Width(150).Padding(0, 0, 0, 6).
 									Children(func() {
 										bar(c, float32(d.BatteryPct)/100,
@@ -69,27 +77,16 @@ func (m *Model) deviceBlock(c *ui.Context) {
 									})
 							})
 						} else {
-							ui.Text(c, m.batteryFallback()).FontSize(14).
+							// 与版本号同字号，两列底部才对得齐
+							ui.Text(c, m.batteryFallback()).FontSize(20).
 								TextColor(colorTextFaint)
 						}
 					})
 				})
 
-				// 端口 · MAC，右侧始终有刷新入口
-				ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, orDash(dev.Port)+"  ·  "+orDash(d.MacHID)).
-						FontSize(10).TextColor(colorTextFaint)
-					ui.Spacer(c)
-
-					if m.scanning || m.detailLoading || m.fwLoading {
-						ui.Button(c, "刷新中…").Disabled(true)
-						return
-					}
-					// 唯一的刷新入口：设备与固件一起刷
-					if ui.Button(c, "刷新").Clicked() {
-						m.refreshAll()
-					}
-				})
+				// 第 3 行：端口 · MAC
+				ui.Text(c, orDash(dev.Port)+"  ·  "+orDash(d.MacHID)).
+					FontSize(10).TextColor(colorTextFaint)
 			})
 		})
 
@@ -243,21 +240,22 @@ func (m *Model) firmwareRow(c *ui.Context, i int) {
 	})
 }
 
-// actionBlock 渲染底部操作区：待刷版本、进度与刷写按钮。
+// actionBlock 渲染底部操作区：第一行是状态与按钮，第二行是进度条。
 func (m *Model) actionBlock(c *ui.Context) {
 	ui.Box(c).FillWidth().Height(actionHeight).Background(colorPanel).
 		Children(func() {
 			hairline(c)
 
-			ui.Row(c).FillWidth().Padding(10, pagePadding).Gap(18).
-				AlignItems(ui.Center).
+			ui.Column(c).FillWidth().Padding(10, pagePadding).Gap(8).
 				Children(func() {
-					ui.Column(c).Grow(1).Gap(6).Children(func() {
-						m.actionHeadline(c)
-						m.actionProgress(c)
-					})
+					ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).
+						Children(func() {
+							m.actionHeadline(c)
+							ui.Spacer(c)
+							m.actionButton(c)
+						})
 
-					m.actionButton(c)
+					m.actionProgress(c)
 				})
 		})
 }
@@ -265,20 +263,19 @@ func (m *Model) actionBlock(c *ui.Context) {
 // actionHeadline 渲染操作区主文案。
 func (m *Model) actionHeadline(c *ui.Context) {
 	fw := m.selectedFirmware()
+	// 优先用 HID 读到的版本；读不到时退化到扫描时的版本
 	from := "—"
 	if d := m.detail; d != nil && d.FwVersion != "" {
 		from = "V" + d.FwVersion
+	} else if dev := m.selectedDevice(); dev != nil && dev.FwVersion != "" {
+		from = "V" + dev.FwVersion
 	}
 
 	switch {
 	case m.flashing:
 		if fw != nil {
-			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "正在刷写").FontSize(10).TextColor(colorTextFaint)
-				ui.Text(c, "V"+fw.Version).FontSize(16).Bold().TextColor(colorBrandDark)
-				ui.Text(c, fmt.Sprintf("%s → V%s", from, fw.Version)).
-					FontSize(10).TextColor(colorTextMuted)
-			})
+			m.headlineTwoLines(c, "正在刷写", "V"+fw.Version, colorBrandDark,
+				fmt.Sprintf("%s → V%s", from, fw.Version), nil)
 		}
 
 	case m.result != nil && m.result.Success:
@@ -295,22 +292,35 @@ func (m *Model) actionHeadline(c *ui.Context) {
 			TextColor(colorText).Wrap()
 
 	case fw != nil:
-		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "待刷写").FontSize(10).TextColor(colorTextFaint)
-			ui.Text(c, "V"+fw.Version).FontSize(16).Bold().TextColor(colorText)
-			ui.Text(c, fmt.Sprintf("%s → V%s", from, fw.Version)).
-				FontSize(10).TextColor(colorTextMuted)
-
-			// 多语言包：直接在这里选子包，不用另开一页
-			if names := m.languageNames(fw); len(names) > 0 {
-				m.languageSelect(c, names)
-			}
-		})
+		var extra func()
+		if names := m.languageNames(fw); len(names) > 0 {
+			extra = func() { m.languageSelect(c, names) }
+		}
+		m.headlineTwoLines(c, "待刷写", "V"+fw.Version, colorText,
+			fmt.Sprintf("%s → V%s", from, fw.Version), extra)
 
 	default:
 		ui.Text(c, "选择一个固件包开始刷写").FontSize(12).
 			TextColor(colorTextMuted)
 	}
+}
+
+// headlineTwoLines 渲染两行式主文案：第一行是小标签，第二行是版本号。
+func (m *Model) headlineTwoLines(c *ui.Context, tag, version string, verColor ui.Color,
+	sub string, extra func()) {
+	ui.Column(c).Gap(2).Children(func() {
+		ui.Text(c, tag).FontSize(10).TextColor(colorTextFaint)
+
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, version).FontSize(16).Bold().TextColor(verColor)
+			if sub != "" {
+				ui.Text(c, sub).FontSize(10).TextColor(colorTextMuted)
+			}
+			if extra != nil {
+				extra()
+			}
+		})
+	})
 }
 
 // languageNames 返回多语言固件的子包显示名；非多语言返回 nil。
@@ -346,21 +356,20 @@ func (m *Model) languageSelect(c *ui.Context, names []string) {
 	})
 }
 
-// actionProgress 渲染操作区进度条（刷写中或完成后）。
+// actionProgress 渲染进度条行。未开始刷写时也显示，保持版式稳定。
 func (m *Model) actionProgress(c *ui.Context) {
-	if m.result == nil && !m.flashing {
-		return
-	}
-
-	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-		ui.Box(c).Grow(1).Children(func() {
+	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+		ui.Box(c).Width(300).Children(func() {
 			bar(c, float32(m.prog.Ratio()), colorBrand)
 		})
+
 		ui.Text(c, fmt.Sprintf("%d%%", m.prog.Percent)).FontSize(10).
-			TextColor(colorTextMuted).Width(34)
+			TextColor(colorTextMuted)
+
 		if name := m.currentStepName(); name != "" && m.flashing {
-			ui.Text(c, name).FontSize(10).TextColor(colorTextFaint).Width(56)
+			ui.Text(c, name).FontSize(10).TextColor(colorTextFaint)
 		}
+
 		if m.prog.TotalBytes > 0 {
 			ui.Text(c, fmt.Sprintf("%s / %s",
 				humanSize(m.prog.BytesWritten), humanSize(m.prog.TotalBytes))).

@@ -58,10 +58,10 @@ func Run(svc core.Services) error {
 	mygo.App.WhenReady(func() {
 		m.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:           "Thunderstrike Controller Tool",
-			Width:           720,
-			Height:          570,
-			MinWidth:        620,
-			MinHeight:       500,
+			Width:           760,
+			Height:          700,
+			MinWidth:        680,
+			MinHeight:       560,
 			BackgroundColor: "#FFFFFF",
 			// 自绘标题栏：系统标题栏是浅灰的，与白底界面割裂
 			TitleBarStyle:  mygo.TitleBarHidden,
@@ -104,17 +104,12 @@ func (m *Model) View(c *ui.Context) {
 	c.SetTheme(buildTheme())
 	m.handleKeys(c)
 
-	sw, sh := c.Size()
-	bodyH := sh - headerHeight - actionHeight - footerHeight - 2
-
-	ui.Column(c).Width(sw).Height(sh).Background(colorBg).Children(func() {
+	// 完全自然流：页头 / 设备 / 固件 / 操作 / 状态依次排列。
+	// 不设 Width：FillWidth 会按窗口宽度算，不扣内边距，导致右侧被裁。
+	ui.Column(c).Fill().Background(colorBg).Children(func() {
 		m.headerBar(c)
-
-		ui.Box(c).Width(sw).Height(bodyH).Children(func() {
-			m.deviceBlock(c)
-			m.firmwareBlock(c)
-		})
-
+		m.deviceBlock(c)
+		m.firmwareBlock(c)
 		m.actionBlock(c)
 		m.statusBar(c)
 	})

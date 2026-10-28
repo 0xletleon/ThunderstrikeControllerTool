@@ -10,7 +10,7 @@ import "github.com/egoist/mygo/ui"
 const (
 	headerHeight = 44
 	footerHeight = 34
-	actionHeight = 76
+	actionHeight = 88
 	pagePadding  = 18
 )
 
@@ -85,7 +85,13 @@ func bar(c *ui.Context, ratio float32, fg ui.Color) {
 		ratio = 1
 	}
 
-	ui.Box(c).FillWidth().Height(4).Radius(2).Background(colorBrandTrack).
+	// 空进度用灰色轨道，避免未开始时一条淡绿线显得像已完成
+	track := colorLine
+	if ratio > 0 {
+		track = colorBrandTrack
+	}
+
+	ui.Box(c).FillWidth().Height(4).Radius(2).Background(track).
 		Children(func() {
 			if ratio <= 0 {
 				return
